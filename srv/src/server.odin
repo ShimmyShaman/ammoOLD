@@ -5,11 +5,21 @@ import "core:time"
 
 import enet "vendor:ENet"
 
+ClientStatus :: enum {
+  Unauthorized = 0,
+  Authorized = 1,
+}
+
+PeerProfile :: struct {
+  status: ClientStatus,
+}
+
 main :: proc() {
   fmt.println("server begin!")
   defer fmt.println("server end!")
   defer time.sleep(time.Second * 2)
 
+  // Initialize
   res := enet.initialize()
   if res != 0 {
     fmt.println("failed to initialize enet")
@@ -17,6 +27,7 @@ main :: proc() {
   }
   defer enet.deinitialize()
 
+  // Create host
   address := enet.Address {
     host = enet.HOST_ANY,
     port = 1234,
@@ -29,22 +40,28 @@ main :: proc() {
     return
   }
   defer enet.host_destroy(server)
-
   fmt.println("server created")
+
+  // Listen for events
   event: enet.Event
-  for enet.host_service(server, &event, 5000) > 0 {
+  for {
+    res := enet.host_service(server, &event, 5000)
+    if res < 1 do continue
     switch event.type {
       case .CONNECT:
-        fmt.println("client connected!")
+        fmt.println(args={"Client Connection:", event.peer.address.host, ":", event.peer.address.port,
+          " [connectedPeers=", server.connectedPeers, "]"}, sep = "")
+
       case .RECEIVE:
-        fmt.println("client received: ") //, string(event.packet.data))
+        fmt.println("server received: ") //, string(event.packet.data))
         // enet.packet_destroy(event.packet)
       case .DISCONNECT:
-        fmt.println("client disconnected!")
+        fmt.println(args={"Client Disconnection:", event.peer.address.host, ":", event.peer.address.port,
+          " [connectedPeers=", server.connectedPeers, "]"}, sep = "")
       case .NONE:
-        fmt.println("client none!")
+        fmt.println("server none!")
     }
   }
-  
+
   return
 }

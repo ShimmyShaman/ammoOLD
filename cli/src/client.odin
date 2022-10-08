@@ -45,17 +45,33 @@ main :: proc() {
     return
   }
 
-  for enet.host_service(client, &event, 2000) > 0 {
+  for enet.host_service(client, &event, 4000) > 0 {
     switch event.type {
       case .CONNECT:
         fmt.println("client connected!")
       case .RECEIVE:
-        fmt.println("client received: ") //, string(event.packet.data))
+        fmt.println("client received: ", cstring(event.packet.data))
         // enet.packet_destroy(event.packet)
       case .DISCONNECT:
         fmt.println("client disconnected!")
       case .NONE:
         fmt.println("client none!")
     }
+  }
+
+  enet.peer_disconnect(peer, 0)
+
+  r := 0
+  disconnect_loop: for {
+    res := enet.host_service(client, &event, 1000) > 0
+    #partial switch event.type {
+      case .DISCONNECT:
+        time.sleep(time.Second * 1)
+        fmt.println("client disconnected!")
+        break disconnect_loop
+    }
+    
+    r += 1
+    if r > 10 do break disconnect_loop
   }
 }
