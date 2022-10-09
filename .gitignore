@@ -53,3 +53,5 @@ dkms.conf
 
 # Project
 bin/
+cli/src/violin
+cli/deps
