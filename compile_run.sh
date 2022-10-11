@@ -26,24 +26,24 @@ export LD_LIBRARY_PATH="/usr/local/lib"
 # echo $PATH;/home/bug/proj/odin_vulkan_cube/src/odin-vma/external/VulkanMemoryAllocator.lib
 # /home/bug/proj/Odin/vendor/stb/lib/stb_image.a
 # $ODIN run ./src/kgs -debug -out:$EXE
-$ODIN run ./cli/src -extra-linker-flags:"-lstdc++ -lvulkan" -debug -out:$BIN/client \
-& \
-$ODIN run ./srv/src -extra-linker-flags:"-lstdc++ -lvulkan" -debug -out:$BIN/server
+$ODIN build ./cli/src -extra-linker-flags:"-lstdc++ -lvulkan" -debug -out:$BIN/client
+retval=$?
+if [ $retval -ne 0 ]; then
+    echo "Client Compilation Failed : $retval"
+fi
 
-# 
+$ODIN build ./srv/src -extra-linker-flags:"-lstdc++ -lvulkan" -debug -out:$BIN/server
+retval=$?
+if [ $retval -ne 0 ]; then
+    echo "Server Compilation Failed : $retval"
+fi
 
-# retval=$?
-# if [ $retval -ne 0 ]; then
-#     echo "Compilation Failed : $retval"
-# else
-#     echo "#######################"
-#     echo Compilation Succeeded -- Running...
-#     echo "#######################"
-#     # export EXTRA_CLING_ARGS='-Wmacro-redefined'
-#     # set PATH=/home/
-#     $BIN/$EXE
-#     # -x c
-#     retval=$?
-#     echo "#######################"
-#     echo "Program Exited: $retval"
-# fi
+
+
+retval=$?
+if [ $retval -eq 0 ]; then
+    echo "#######################"
+    echo Compilation Succeeded -- Running...
+    echo "#######################"
+    $BIN/client & $BIN/server
+fi

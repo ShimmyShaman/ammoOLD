@@ -87,7 +87,7 @@ parse_packet :: proc(data: [^]u8, data_length: int) -> (pd: ^PacketData) {
   sb: strings.Builder = strings.builder_make(context.temp_allocator)
 
   aerr: mem.Allocator_Error
-  pd, aerr = new(PacketData)
+  pd, aerr = new(PacketData, context.temp_allocator)
   type_value: u16 = auto_cast data[0] + cast(u16)256 * auto_cast data[1]
   // fmt.print("data:\n")
   // for i in 0..<24 {

@@ -30,9 +30,9 @@ PacketFlag :: enum u32 {
 }
 
 main :: proc() {
+  time.sleep(time.Second * 1)
   fmt.println("[C] client begin!")
   defer fmt.println("[C] client end!")
-  time.sleep(time.Second * 1)
   
   res := enet.initialize()
   if res != 0 {

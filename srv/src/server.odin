@@ -1,6 +1,8 @@
 package server
 
 import "core:fmt"
+import "core:mem"
+import "core:os"
 import "core:time"
 import "core:strings"
 
@@ -29,16 +31,31 @@ ServerInfo :: struct {
   host: ^enet.Host,
 }
 
+
+
 main :: proc() {
+  // buffer: [256]u8
+  // bytes_read, _ := os.read(os.stdin, buffer[:])
+  // text := cast(string) buffer[:bytes_read]
+
+  // fmt.printf("ee-%s-ee", text)
+
+  begin_server()
+
+  return
+}
+
+begin_server :: proc() -> Error {
+
   fmt.println("[S] server begin!")
   defer fmt.println("[S] server end!")
-  defer time.sleep(time.Second * 2)
+  defer time.sleep(time.Second * 1)
 
   // Initialize
   res := enet.initialize()
   if res != 0 {
     fmt.println("[S] failed to initialize enet")
-    return
+    return .NotYetDetailed
   }
   defer enet.deinitialize()
 
@@ -49,12 +66,12 @@ main :: proc() {
     host = enet.HOST_ANY,
     port = 1234,
   }
-  enet.address_set_host(&address, "127.0.0.1")
+  enet.address_set_host(&address, "127.0.0.1") // TODO result check
 
   server_info.host = enet.host_create(&address, 32, 2, 0, 0)
   if server_info.host == nil {
     fmt.println("[S] failed to create server host")
-    return
+    return .NotYetDetailed
   }
   defer enet.host_destroy(server_info.host)
   fmt.println("[S] server_info.host created")
@@ -62,13 +79,21 @@ main :: proc() {
   // Listen for events
   process_events(&server_info)
 
-  return
+  return .Success
 }
 
 process_events :: proc(server_info: ^ServerInfo) -> Error {
+  start_time := time.now()
+
   // Loop
   event: enet.Event
   for {
+    MaxUpTimeSecs :: 10
+    if time.diff(start_time, time.now()) >= MaxUpTimeSecs * time.Second {
+      fmt.println("[S] Server up for", MaxUpTimeSecs, "seconds. Closing down...")
+      break
+    }
+
     res := enet.host_service(server_info.host, &event, 1000)
     if res < 0 {
       fmt.println("[S] host_service error:", res)
@@ -77,6 +102,11 @@ process_events :: proc(server_info: ^ServerInfo) -> Error {
 
     if res == 0 {
       continue
+    }
+
+    defer {
+      mem.free_all(context.temp_allocator)
+      enet.packet_destroy(event.packet)
     }
 
     switch event.type {
@@ -151,9 +181,7 @@ handle_receive_event :: proc(server_info: ^ServerInfo, event: ^enet.Event) -> Er
 }
 
 handle_authentication_request :: proc(server_info: ^ServerInfo, event: ^enet.Event, request: ^cm.AuthenticationRequest) -> Error {
-  fmt.println("[S] Received authentication request")
-
-  fmt.println("[S] request:", request)
+  fmt.println("[S] Received authentication request:", request)
 
   // Get profile
   profile: ^PeerProfile = auto_cast event.peer.data
