@@ -6,6 +6,8 @@ import "core:strings"
 
 import enet "vendor:ENet"
 
+import cm "../../common"
+
 Error :: enum {
   Success,
   NotYetDetailed,
@@ -131,10 +133,44 @@ handle_disconnect_event :: proc(server_info: ^ServerInfo, event: ^enet.Event) ->
 }
 
 handle_receive_event :: proc(server_info: ^ServerInfo, event: ^enet.Event) -> Error {
+  // Parse the received data packet
+  pd: ^cm.PacketData = cm.parse_packet(event.packet.data, auto_cast event.packet.dataLength)
+  
+  //  auto_cast event.packet.data
+  fmt.println("[S] Received packet:", pd.data_type, "size:", event.packet.dataLength)
 
-  str := strings.string_from_nul_terminated_ptr(auto_cast event.packet.data, auto_cast event.packet.dataLength)
+  #partial switch pd.data_type {
+    case .AuthenticationRequest:
+      handle_authentication_request(server_info, event, auto_cast &pd.data) or_return
+    case:
+      fmt.println("[S] Error? Unknown packet type:", pd.data_type)
+      return .NotYetDetailed
+  }
 
-  fmt.println("[S] Received:", str)
+  return .Success
+}
+
+handle_authentication_request :: proc(server_info: ^ServerInfo, event: ^enet.Event, request: ^cm.AuthenticationRequest) -> Error {
+  fmt.println("[S] Received authentication request")
+
+  fmt.println("[S] request:", request)
+
+  // Get profile
+  profile: ^PeerProfile = auto_cast event.peer.data
+  if profile.status != .Unauthorized {
+    fmt.println("[S] Error? Client is already authorized")
+    return .Success
+  }
+
+  // Check credentials
+  fmt.println(args={"[S] request.username:'", request.username, "'<>'test-user' =", strings.compare(request.username, "test-user")}, sep = "")
+  fmt.println(args={"[S] request.password:'", request.password, "'<>'test-pass' =", strings.compare(request.password, "test-pass")}, sep = "")
+  if strings.compare(request.username, "test-user") == 0 && strings.compare(request.password, "test-pass") == 0 {
+    fmt.println("[S] Client", request.username, "authenticated")
+    profile.status = .Authorized
+  } else {
+    fmt.println("[S] Client authentication failed for user:", request.username)
+  }
 
   return .Success
 }
