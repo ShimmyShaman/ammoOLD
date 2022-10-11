@@ -83,14 +83,14 @@ begin_server :: proc() -> Error {
 }
 
 process_events :: proc(server_info: ^ServerInfo) -> Error {
-  start_time := time.now()
+  activity_time := time.now()
 
   // Loop
   event: enet.Event
   for {
-    MaxUpTimeSecs :: 10
-    if time.diff(start_time, time.now()) >= MaxUpTimeSecs * time.Second {
-      fmt.println("[S] Server up for", MaxUpTimeSecs, "seconds. Closing down...")
+    MaxUpTimeSecs :: 3
+    if time.diff(activity_time, time.now()) >= MaxUpTimeSecs * time.Second {
+      fmt.println("[S] Server recieved no activity for", MaxUpTimeSecs, "seconds. Closing down...")
       break
     }
 
@@ -104,6 +104,8 @@ process_events :: proc(server_info: ^ServerInfo) -> Error {
       continue
     }
 
+    // Received something
+    activity_time = time.now()
     defer {
       mem.free_all(context.temp_allocator)
       enet.packet_destroy(event.packet)
@@ -191,13 +193,13 @@ handle_authentication_request :: proc(server_info: ^ServerInfo, event: ^enet.Eve
   }
 
   // Check credentials
-  fmt.println(args={"[S] request.username:'", request.username, "'<>'test-user' =", strings.compare(request.username, "test-user")}, sep = "")
-  fmt.println(args={"[S] request.password:'", request.password, "'<>'test-pass' =", strings.compare(request.password, "test-pass")}, sep = "")
   if strings.compare(request.username, "test-user") == 0 && strings.compare(request.password, "test-pass") == 0 {
     fmt.println("[S] Client", request.username, "authenticated")
     profile.status = .Authorized
   } else {
-    fmt.println("[S] Client authentication failed for user:", request.username)
+    fmt.println("[S] Client authentication failed", request.username)
+    fmt.println(args={"[S] - request.username:'", request.username, "'<>'test-user' =", strings.compare(request.username, "test-user")}, sep = "")
+    fmt.println(args={"[S] - request.password:'", request.password, "'<>'test-pass' =", strings.compare(request.password, "test-pass")}, sep = "")
   }
 
   return .Success

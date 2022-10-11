@@ -45,5 +45,6 @@ if [ $retval -eq 0 ]; then
     echo "#######################"
     echo Compilation Succeeded -- Running...
     echo "#######################"
-    $BIN/client & $BIN/server
+    $BIN/client & valgrind -s $BIN/server
+    # valgrind -s $BIN/client & valgrind -s $BIN/server
 fi
