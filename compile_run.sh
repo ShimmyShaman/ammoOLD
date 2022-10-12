@@ -30,21 +30,19 @@ $ODIN build ./cli/src -extra-linker-flags:"-lstdc++ -lvulkan" -debug -out:$BIN/c
 retval=$?
 if [ $retval -ne 0 ]; then
     echo "Client Compilation Failed : $retval"
+else
+    $ODIN build ./srv/src -extra-linker-flags:"-lstdc++ -lvulkan" -debug -out:$BIN/server
+    retval=$?
+    if [ $retval -ne 0 ]; then
+        echo "Server Compilation Failed : $retval"
+    fi
 fi
 
-$ODIN build ./srv/src -extra-linker-flags:"-lstdc++ -lvulkan" -debug -out:$BIN/server
-retval=$?
-if [ $retval -ne 0 ]; then
-    echo "Server Compilation Failed : $retval"
-fi
 
-
-
-retval=$?
 if [ $retval -eq 0 ]; then
     echo "#######################"
     echo Compilation Succeeded -- Running...
     echo "#######################"
-    $BIN/client & valgrind -s $BIN/server
+    $BIN/client && echo "## Client Ended ##" & valgrind -s $BIN/server
     # valgrind -s $BIN/client & valgrind -s $BIN/server
 fi

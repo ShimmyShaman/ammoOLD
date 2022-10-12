@@ -88,9 +88,9 @@ process_events :: proc(server_info: ^ServerInfo) -> Error {
   // Loop
   event: enet.Event
   for {
-    MaxUpTimeSecs :: 3
+    MaxUpTimeSecs :: 10
     if time.diff(activity_time, time.now()) >= MaxUpTimeSecs * time.Second {
-      fmt.println("[S] Server recieved no activity for", MaxUpTimeSecs, "seconds. Closing down...")
+      fmt.println("[S] Server received no activity for", MaxUpTimeSecs, "seconds. Closing down...")
       break
     }
 
