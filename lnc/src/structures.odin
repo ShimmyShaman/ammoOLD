@@ -1,4 +1,4 @@
-package client
+package launcher
 
 Error :: enum {
   Success = 0,
@@ -20,6 +20,6 @@ NetworkData :: struct {
   status: NetworkStatus,
 }
 
-GameData :: struct {
+LauncherData :: struct {
   net: NetworkData,
 }

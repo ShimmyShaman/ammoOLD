@@ -20,29 +20,19 @@ echo "########################################"
 
 # Server
 # export LD_LIBRARY_PATH="/home/bug/proj/Odin/vendor/stb/lib"
-export LD_LIBRARY_PATH="/usr/local/lib"
+# export LD_LIBRARY_PATH="/usr/local/lib"
 # echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
 # export PATH="/home/bug/proj/Odin/vendor/stb/lib:$PATH"
 # echo $PATH;/home/bug/proj/odin_vulkan_cube/src/odin-vma/external/VulkanMemoryAllocator.lib
 # /home/bug/proj/Odin/vendor/stb/lib/stb_image.a
 # $ODIN run ./src/kgs -debug -out:$EXE
-$ODIN build ./cli/src -extra-linker-flags:"-lstdc++ -lvulkan" -debug -out:$BIN/client
+$ODIN build ./src -extra-linker-flags:deps/asterm/asterm.so -debug -out:$BIN/server
 retval=$?
 if [ $retval -ne 0 ]; then
-    echo "Client Compilation Failed : $retval"
+    echo "Server Compilation Failed : $retval"
 else
-    $ODIN build ./srv/src -extra-linker-flags:"-lstdc++ -lvulkan" -debug -out:$BIN/server
-    retval=$?
-    if [ $retval -ne 0 ]; then
-        echo "Server Compilation Failed : $retval"
-    fi
-fi
-
-
-if [ $retval -eq 0 ]; then
     echo "#######################"
-    echo Compilation Succeeded -- Running...
+    echo Compilation Succeeded -- Running...d
     echo "#######################"
-    $BIN/client && echo "## Client Ended ##" & valgrind -s $BIN/server
-    # valgrind -s $BIN/client & valgrind -s $BIN/server
+    valgrind -s $BIN/server
 fi

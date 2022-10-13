@@ -1,4 +1,4 @@
-package client
+package launcher
 
 import "core:fmt"
 import "core:time"
@@ -24,21 +24,21 @@ main :: proc() {
     return
   }
 
-  game_data: GameData
+  launcher_data: LauncherData
 
   // Begin Network Connection
-  game_data.net.is_active = true
-  thread := thread.create_and_start_with_data(&game_data.net, begin_client_network_connection)
+  launcher_data.net.is_active = true
+  thread := thread.create_and_start_with_data(&launcher_data.net, begin_client_network_connection)
 
-  _begin_game_loop(&vctx, &game_data)
+  _begin_game_loop(&vctx, &launcher_data)
 
-  game_data.net.should_close = true
-  for game_data.net.is_active {
+  launcher_data.net.should_close = true
+  for launcher_data.net.is_active {
     time.sleep(time.Millisecond * 10)
   }
 }
 
-_begin_game_loop :: proc(ctx: ^vi.Context, game_data: ^GameData) -> Error {
+_begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Error {
   rctx: ^vi.RenderContext
   verr: vi.Error
 

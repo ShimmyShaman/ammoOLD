@@ -8,6 +8,8 @@ import "core:strings"
 
 import enet "vendor:ENet"
 
+import "vendor:sdl2"
+
 import cm "../../common"
 
 Error :: enum {
@@ -31,7 +33,15 @@ ServerInfo :: struct {
   host: ^enet.Host,
 }
 
+import "core:c"
 
+foreign import ceg "shared:deps/asterm/asterm.o"
+foreign ceg {
+  kbhit :: proc() -> int ---
+  getch :: proc() -> int ---
+  // do_the_thing :: proc (a: c.int) -> c.int ---
+	// ExitProcess :: proc "stdcall" (exit_code:  u32) ---
+}
 
 main :: proc() {
   // buffer: [256]u8
@@ -77,6 +87,7 @@ begin_server :: proc() -> Error {
   fmt.println("[S] server_info.host created")
 
   // Listen for events
+  fmt.println("[S] Server beginning (press 'o' for options, 'q' to quit)")
   process_events(&server_info)
 
   return .Success
@@ -88,11 +99,22 @@ process_events :: proc(server_info: ^ServerInfo) -> Error {
   // Loop
   event: enet.Event
   for {
-    MaxUpTimeSecs :: 10
-    if time.diff(activity_time, time.now()) >= MaxUpTimeSecs * time.Second {
-      fmt.println("[S] Server received no activity for", MaxUpTimeSecs, "seconds. Closing down...")
-      break
+    // Check for input
+    if kbhit() != 0 {
+      ch: rune = auto_cast getch()
+      switch ch {
+        case 'q':
+          fmt.println("[S] Quitting due to User Command")
+          return .Success
+        case:
+          fmt.println("[S] Unknown User Command:", ch)
+      }
     }
+    // MaxUpTimeSecs :: 10
+    // if time.diff(activity_time, time.now()) >= MaxUpTimeSecs * time.Second {
+    //   fmt.println("[S] Server received no activity for", MaxUpTimeSecs, "seconds. Closing down...")
+    //   break
+    // }
 
     res := enet.host_service(server_info.host, &event, 1000)
     if res < 0 {

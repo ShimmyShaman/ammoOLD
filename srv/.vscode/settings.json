@@ -1,0 +1,4 @@
+{
+    "cmake.sourceDirectory": "${workspaceFolder}/source",
+    "editor.wordWrap": "on",
+}
