@@ -828,7 +828,7 @@ create_vertex_buffer :: proc(using ctx: ^Context, render_data: ^RenderData, vert
     flags = {.HOST_ACCESS_SEQUENTIAL_WRITE, .MAPPED},
   }
 
-  fmt.println("Creating staging buffer... size=", buffer_info.size)
+  // fmt.println("Creating staging buffer... size=", buffer_info.size)
   vkres := vma.CreateBuffer(vma_allocator, &buffer_info, &allocation_create_info, &staging.buffer,
     &staging.allocation, &staging.allocation_info)
   if vkres != .SUCCESS {
@@ -837,7 +837,7 @@ create_vertex_buffer :: proc(using ctx: ^Context, render_data: ^RenderData, vert
   }
   // defer vk.DestroyBuffer(device, staging.buffer, nil)
   // defer vk.FreeMemory(device, staging.allocation_info.deviceMemory, nil)
-  fmt.println("Created staging buffer.")
+  // fmt.println("Created staging buffer.")
   defer vma.DestroyBuffer(vma_allocator, staging.buffer, staging.allocation) //TODO -- one day, why isn't this working?
 
   // Copy from staging buffer to vertex buffer
@@ -864,7 +864,7 @@ create_vertex_buffer :: proc(using ctx: ^Context, render_data: ^RenderData, vert
 
   _end_single_time_commands(ctx) or_return
 
-  fmt.println("Created vertex buffer with size: ", render_data.vertex_buffer.size)
+  // fmt.println("Created vertex buffer with size: ", render_data.vertex_buffer.size)
 
   return .Success
 }
@@ -1024,6 +1024,6 @@ create_render_program :: proc(ctx: ^Context, info: ^RenderProgramCreateInfo) -> 
   rp.pipeline = create_graphics_pipeline(ctx, &info.pipeline_config, &vertex_binding, vertex_attributes[:vertex_attributes_count],
     &rp.descriptor_layout) or_return
 
-  fmt.println("create_render_program return")
+  // fmt.println("create_render_program return")
   return
 }

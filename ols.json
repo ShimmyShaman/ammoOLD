@@ -3,6 +3,10 @@
         {
             "name": "core",
             "path": "/home/bug/proj/Odin/core"
+        },
+        {
+            "name": "vendor",
+            "path": "/home/bug/proj/Odin/vendor"
         }
     ],
     "enable_document_symbols": true,

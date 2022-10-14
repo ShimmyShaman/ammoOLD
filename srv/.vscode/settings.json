@@ -1,4 +1,5 @@
 {
     "cmake.sourceDirectory": "${workspaceFolder}/source",
     "editor.wordWrap": "on",
+    "workbench.colorTheme": "Monokai Dimmed"
 }

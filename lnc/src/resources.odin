@@ -49,7 +49,7 @@ import vi "../../violin"
 //   }
 
 //   // fmt.println("create_graphics_pipeline")
-//   // vi.create_graphics_pipeline(ctx, "cli/res/shaders/shader.vert", "cli/res/shaders/shader.frag", &VERTEX_BINDING, VERTEX_ATTRIBUTES[:]) or_return
+//   // vi.create_graphics_pipeline(ctx, "res/shaders/shader.vert", "res/shaders/shader.frag", &VERTEX_BINDING, VERTEX_ATTRIBUTES[:]) or_return
 
 //   // fmt.println("create_vertex_buffer")
 //   // vi.create_vertex_buffer(ctx, raw_data(vertices[:]), size_of(Vertex), 4) or_return
@@ -105,8 +105,8 @@ load_textured_rect :: proc(ctx: ^vi.Context, render_pass: vi.RenderPassResourceH
   
     rp_create_info := vi.RenderProgramCreateInfo {
       pipeline_config = vi.PipelineCreateConfig {
-        vertex_shader_filepath = "cli/res/shaders/tex2d.vert",
-        fragment_shader_filepath = "cli/res/shaders/tex2d.frag",
+        vertex_shader_filepath = "res/shaders/tex2d.vert",
+        fragment_shader_filepath = "res/shaders/tex2d.frag",
         render_pass = render_pass,
       },
       vertex_size = size_of(Vertex),
@@ -127,8 +127,8 @@ load_textured_rect :: proc(ctx: ^vi.Context, render_pass: vi.RenderPassResourceH
     // fmt.println("create_index_buffer")
     vi.create_index_buffer(ctx, &rd, auto_cast &indices[0], 6) or_return
   
-    texture := vi.load_texture_from_file(ctx, "cli/res/textures/parthenon.jpg") or_return
-    // texture := vi.load_texture_from_file(ctx, "cli/res/textures/cube_texture.png") or_return
+    texture := vi.load_texture_from_file(ctx, "res/textures/parthenon.jpg") or_return
+    // texture := vi.load_texture_from_file(ctx, "res/textures/cube_texture.png") or_return
     append_elem(&rd.input, texture)
   
     return
@@ -216,8 +216,8 @@ load_textured_rect :: proc(ctx: ^vi.Context, render_pass: vi.RenderPassResourceH
   
     rp_create_info := vi.RenderProgramCreateInfo {
       pipeline_config = vi.PipelineCreateConfig {
-        vertex_shader_filepath = "cli/res/shaders/tex3d.vert",
-        fragment_shader_filepath = "cli/res/shaders/tex3d.frag",
+        vertex_shader_filepath = "res/shaders/tex3d.vert",
+        fragment_shader_filepath = "res/shaders/tex3d.frag",
         render_pass = render_pass,
       },
       vertex_size = size_of(Vertex),
@@ -246,7 +246,7 @@ load_textured_rect :: proc(ctx: ^vi.Context, render_pass: vi.RenderPassResourceH
   
     vi.create_index_buffer(ctx, &rd, auto_cast &index_data[0], len(index_data)) or_return
   
-    texture := vi.load_texture_from_file(ctx, "cli/res/textures/cube_texture.png") or_return
+    texture := vi.load_texture_from_file(ctx, "res/textures/cube_texture.png") or_return
     append_elem(&rd.input, texture)
   
     return

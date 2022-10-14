@@ -87,7 +87,7 @@ begin_server :: proc() -> Error {
   fmt.println("[S] server_info.host created")
 
   // Listen for events
-  fmt.println("[S] Server beginning (press 'o' for options, 'q' to quit)")
+  fmt.println("[S] Server beginning (press '?' for available commands, 'q' to quit)")
   process_events(&server_info)
 
   return .Success
@@ -106,6 +106,9 @@ process_events :: proc(server_info: ^ServerInfo) -> Error {
         case 'q':
           fmt.println("[S] Quitting due to User Command")
           return .Success
+        case '?', '/':
+          fmt.println("[S] Options:")
+          fmt.println("[S]   'q' to quit")
         case:
           fmt.println("[S] Unknown User Command:", ch)
       }

@@ -59,7 +59,6 @@ Context :: struct {
   in_flight_mutex: sync.Mutex,
   in_flight_index: u32,
   _render_contexts: [MAX_FRAMES_IN_FLIGHT]RenderContext,
-  ui_render_pass: RenderPassResourceHandle,
 }
 
 Swapchain :: struct {

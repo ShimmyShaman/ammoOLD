@@ -83,11 +83,11 @@ _process_events :: proc(cli: ^HostInfo) -> Error {
       fmt.println("[C] Client Network Thread forced to close")
       return .Success
     }
-    MaxUpTimeSecs :: 3
-    if time.diff(activity_time, time.now()) >= MaxUpTimeSecs * time.Second {
-      fmt.println("[C] Client recieved no activity for", MaxUpTimeSecs, "seconds. Closing down...")
-      break
-    }
+    // MaxUpTimeSecs :: 3
+    // if time.diff(activity_time, time.now()) >= MaxUpTimeSecs * time.Second {
+    //   fmt.println("[C] Client recieved no activity for", MaxUpTimeSecs, "seconds. Closing down...")
+    //   break
+    // }
 
     res := enet.host_service(cli.host, &event, 1000)
     if res < 0 {
@@ -137,7 +137,7 @@ _force_disconnect :: proc(cli: ^HostInfo) {
   event: enet.Event
   r := 0
   disconnect_loop: for {
-    res := enet.host_service(cli.host, &event, 1000) > 0
+    res := enet.host_service(cli.host, &event, 50) > 0
     #partial switch event.type {
       case .DISCONNECT:
         time.sleep(time.Second * 1)
@@ -146,7 +146,10 @@ _force_disconnect :: proc(cli: ^HostInfo) {
     }
     
     r += 1
-    if r >= 5 do break disconnect_loop
+    if r >= 100 {
+      fmt.println("Disconnect from server not confirmed")
+      break disconnect_loop
+    }
   }
 }
 
