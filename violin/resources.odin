@@ -29,17 +29,19 @@ BufferUsage :: enum {
 
 ResourceHandle :: distinct int
 RenderPassResourceHandle :: distinct ResourceHandle
+UIRenderResourceHandle :: distinct ResourceHandle
 
 ResourceKind :: enum {
   Buffer = 1,
   Texture,
   DepthBuffer,
   RenderPass,
+  UIRenderResource,
 }
 
 Resource :: struct {
   kind: ResourceKind,
-  data: union { Buffer, Texture, DepthBuffer, RenderPass },
+  data: union { Buffer, Texture, DepthBuffer, RenderPass, UIRenderResource },
 }
 
 ImageSamplerUsage :: enum {
@@ -82,6 +84,11 @@ RenderPass :: struct {
   depth_buffer_rh: ResourceHandle,
 }
 
+UIRenderResource :: struct {
+  render_pass: RenderPassResourceHandle,
+  colored_rect_render_program: RenderProgram,
+}
+
 // TODO -- this is a bit of a hack, but it works for now
 // Allocated memory is disconjugate and not reusable
 RESOURCE_BUCKET_SIZE :: 32
@@ -90,7 +97,6 @@ ResourceManager :: struct {
   resource_index: ResourceHandle,
   resource_map: map[ResourceHandle]^Resource,
 }
-
 
 InputAttribute :: struct
 {
@@ -142,7 +148,7 @@ _create_resource :: proc(using rm: ^ResourceManager, resource_kind: ResourceKind
   defer sync.unlock(&rm._mutex)
 
   switch resource_kind {
-    case .Texture, .Buffer, .DepthBuffer, .RenderPass:
+    case .Texture, .Buffer, .DepthBuffer, .RenderPass, .UIRenderResource:
       rh = resource_index
       resource_index += 1
       res : ^Resource = auto_cast mem.alloc(size_of(Resource))
@@ -173,7 +179,12 @@ get_resource_render_pass :: proc(using rm: ^ResourceManager, rh: RenderPassResou
   return
 }
 
-get_resource :: proc {get_resource_any, get_resource_render_pass}
+get_resource_ui :: proc(using rm: ^ResourceManager, rh: UIRenderResourceHandle) -> (ptr: ^RenderPass, err: Error) {
+  ptr = auto_cast get_resource_any(rm, auto_cast rh) or_return
+  return
+}
+
+get_resource :: proc {get_resource_any, get_resource_render_pass, get_resource_ui}
 
 destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
   res := resource_manager.resource_map[rh]
@@ -214,6 +225,11 @@ destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
       vk.DestroyImageView(device, db.view, nil)
       vk.DestroyImage(device, db.image, nil)
       vk.FreeMemory(device, db.memory, nil)
+    case .UIRenderResource:
+      ui: ^UIRenderResource = auto_cast &res.data
+      
+      destroy_resource(ctx, ui.render_pass)
+      destroy_render_program(ctx, ui.colored_rect_render_program)
     case:
       fmt.println("Resource type not supported:", res.kind)
       return .NotYetDetailed
@@ -233,7 +249,11 @@ destroy_render_pass :: proc(using ctx: ^Context, rh: RenderPassResourceHandle) -
   return destroy_resource_any(ctx, auto_cast rh)
 }
 
-destroy_resource :: proc {destroy_resource_any, destroy_render_pass}
+destroy_ui_render_resource :: proc(using ctx: ^Context, rh: UIRenderResourceHandle) -> Error {
+  return destroy_resource_any(ctx, auto_cast rh)
+}
+
+destroy_resource :: proc {destroy_resource_any, destroy_render_pass, destroy_ui_render_resource}
 
 
 _resize_framebuffer_resources :: proc(using ctx: ^Context) -> Error {
