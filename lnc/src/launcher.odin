@@ -62,7 +62,7 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
   // defer vi.destroy_resource(ctx, rpass2d)
 
   ui_handle: vi.UIRenderResourceHandle
-  ui_handle, err = vi.init_ui_render_resources(ctx, { .HasPreviousColorPass, .IsPresent })
+  ui_handle, err = vi.init_ui_render_resources(ctx, { .IsPresent }) // .HasPreviousColorPass,
   if err != .Success {
     fmt.println("create_render_pass ui error")
     return .NotYetDetailed
@@ -182,28 +182,36 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
 
     if vi.begin_ui_render_pass(rctx, ui_handle) != .Success do return .NotYetDetailed
 
-    // vi.draw_ui_rect(rctx, &sq, &co)
-    cmd : ^mu.Command
-    for mu.next_command(&muc, &cmd) {
-      fmt.println("next_command:", cmd)
-      // switch cmd.type {
-      //   case .TEXT:
-      //     vi.draw_text(rctx, cmd.text.text, cmd.text.pos.x, cmd.text.pos.y, cmd.text.color)
-      //   case .RECT:
-      //     vi.draw_colored_rect(rctx, cmd.rect.rect, cmd.rect.color)
-      //   case .ICON:
-      //     fmt.println("TODO: Icon")
-      //   case .CLIP:
-      //     fmt.println("TODO: Clip")
-      // }
-    }
+    sq := mu.Rect{100, 100, 300, 200}
+    co := mu.Color{220, 250, 15, 255}
+    vi.draw_colored_rect(rctx, ui_handle, &sq, &co)
+    // cmd : ^mu.Command
+    // for mu.next_command(&muc, &cmd) {
+    //   fmt.println("next_command:", cmd)
+    //   #partial switch v in cmd.variant {
+    //     case ^mu.Command_Text:
+    //       cmd_t : ^mu.Command_Text = auto_cast &cmd.variant
+    //       fmt.println("text:", cmd_t)
+    //     case ^mu.Command_Rect:
+    //       cmd_r : ^mu.Command_Rect = auto_cast &cmd.variant
+    //       fmt.println("rect:", cmd_r)
+    //     case:
+    //       fmt.println("unknown command:", cmd.variant)
+    //     // case ^mu.Command_Jump:
+    //     //   fmt.println("jump:")
+    //     // case ^mu.Command_Icon:
+    //     //   fmt.println("icon:")
+    //     // case ^mu.Command_Clip:
+    //     //   fmt.println("clip:")
+    //   }
+    // }
 
     if vi.end_present(rctx) != .Success do break loop
  
     recent_frame_count += 1
 
     // Auto-Leave
-    //  if recent_frame_count > 2 do break
+     if recent_frame_count > 0 do break
     // if time.duration_seconds(time.diff(loop_start, now)) >= 1.5 {
     //   break loop
     // }
@@ -256,18 +264,21 @@ handle_window_events :: proc(muc: ^mu.Context) -> (do_end_loop: bool, err: Error
           return
         }
 
-        key_map :: #force_inline proc(x: i32) -> (res: mu.Key, ok: bool) {
-          ok = true;
-          switch x {
-            case cast(i32)sdl.SDLK_LSHIFT:    res = .SHIFT
-            case cast(i32)sdl.SDLK_RSHIFT:    res = .SHIFT
-            case cast(i32)sdl.SDLK_LCTRL:     res = .CTRL
-            case cast(i32)sdl.SDLK_RCTRL:     res = .CTRL
-            case cast(i32)sdl.SDLK_LALT:      res = .ALT
-            case cast(i32)sdl.SDLK_RALT:      res = .ALT
-            case cast(i32)sdl.SDLK_RETURN:    res = .RETURN
-            case cast(i32)sdl.SDLK_BACKSPACE: res = .BACKSPACE
-            case: ok = false
+        key_map :: #force_inline proc(x: sdl2.Keycode) -> (res: mu.Key, ok: bool) {
+          ok = true
+          #partial switch x {
+            case .LSHIFT, .RSHIFT:
+              res = .SHIFT
+            case .LCTRL, .RCTRL:
+              res = .CTRL
+            case .LALT, .RALT:
+              res = .ALT
+            case .RETURN:
+              res = .RETURN
+            case .BACKSPACE:
+              res = .BACKSPACE
+            case:
+              ok = false
           }
           return
         }

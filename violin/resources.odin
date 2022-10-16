@@ -28,6 +28,8 @@ BufferUsage :: enum {
 }
 
 ResourceHandle :: distinct int
+VertexBufferResourceHandle :: distinct ResourceHandle
+IndexBufferResourceHandle :: distinct ResourceHandle
 RenderPassResourceHandle :: distinct ResourceHandle
 UIRenderResourceHandle :: distinct ResourceHandle
 
@@ -74,6 +76,19 @@ DepthBuffer :: struct {
   image: vk.Image,
   memory: vk.DeviceMemory,
   view: vk.ImageView,
+}
+
+VertexBuffer :: struct {
+  using _buf: Buffer,
+  vertices: ^f32,
+  vertex_count: int,
+}
+
+IndexBuffer :: struct {
+  using _buf: Buffer,
+  indices: rawptr,
+  index_count: int,
+  index_type: typeid,
 }
 
 RenderPass :: struct {
@@ -124,18 +139,6 @@ RenderProgram :: struct {
   descriptor_layout: vk.DescriptorSetLayout,
 }
 
-RenderData :: struct {
-  vertices: ^f32,
-  vertex_count: int,
-  vertex_size: int,
-  indices: ^u16,
-  index_count: int,
-
-  vertex_buffer: Buffer,
-  index_buffer: Buffer,
-  input: [dynamic]ResourceHandle,
-}
-
 _init_resource_manager :: proc(using rm: ^ResourceManager) -> Error {
   resource_index = 1000
   resource_map = make(map[ResourceHandle]^Resource)
@@ -179,7 +182,7 @@ get_resource_render_pass :: proc(using rm: ^ResourceManager, rh: RenderPassResou
   return
 }
 
-get_resource_ui :: proc(using rm: ^ResourceManager, rh: UIRenderResourceHandle) -> (ptr: ^RenderPass, err: Error) {
+get_resource_ui :: proc(using rm: ^ResourceManager, rh: UIRenderResourceHandle) -> (ptr: ^UIRenderResource, err: Error) {
   ptr = auto_cast get_resource_any(rm, auto_cast rh) or_return
   return
 }
@@ -229,7 +232,7 @@ destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
       ui: ^UIRenderResource = auto_cast &res.data
       
       destroy_resource(ctx, ui.render_pass)
-      destroy_render_program(ctx, ui.colored_rect_render_program)
+      destroy_render_program(ctx, &ui.colored_rect_render_program)
     case:
       fmt.println("Resource type not supported:", res.kind)
       return .NotYetDetailed
@@ -830,10 +833,15 @@ write_to_buffer :: proc(using ctx: ^Context, rh: ResourceHandle, data: rawptr, s
   return .NotYetDetailed
 }
 
-create_vertex_buffer :: proc(using ctx: ^Context, render_data: ^RenderData, vertex_data: rawptr, vertex_size_in_bytes: int,
-  vertex_count: int) -> Error {
-  // render_data.vertex_buffer.length = vertex_count
-  render_data.vertex_buffer.size = cast(vk.DeviceSize)(vertex_count * vertex_size_in_bytes);
+create_vertex_buffer :: proc(using ctx: ^Context, vertex_data: rawptr, vertex_size_in_bytes: int,
+  vertex_count: int) -> (rh: VertexBufferResourceHandle, err: Error) {
+  // Create the resource
+  rh = auto_cast _create_resource(&ctx.resource_manager, .VertexBuffer) or_return
+  vertex_buffer: ^VertexBuffer = auto_cast get_resource(&ctx.resource_manager, rh) or_return
+
+  // Set
+  vertex_buffer.vertex_count = vertex_count
+  vertex_buffer.size = auto_cast vertex_size_in_bytes * vertex_count
 
   // Staging buffer
   staging: Buffer
@@ -842,63 +850,79 @@ create_vertex_buffer :: proc(using ctx: ^Context, render_data: ^RenderData, vert
     size  = cast(vk.DeviceSize)(vertex_size_in_bytes * vertex_count),
     usage = {.TRANSFER_SRC},
     sharingMode = .EXCLUSIVE,
-  };
+  }
   allocation_create_info := vma.AllocationCreateInfo {
     usage = .AUTO,
     flags = {.HOST_ACCESS_SEQUENTIAL_WRITE, .MAPPED},
   }
 
-  // fmt.println("Creating staging buffer... size=", buffer_info.size)
   vkres := vma.CreateBuffer(vma_allocator, &buffer_info, &allocation_create_info, &staging.buffer,
     &staging.allocation, &staging.allocation_info)
   if vkres != .SUCCESS {
     fmt.eprintf("Error: Failed to create staging buffer!\n");
-    return .NotYetDetailed
+    destroy_resource_any(ctx, rh)
+    err = .NotYetDetailed
+    return
   }
-  // defer vk.DestroyBuffer(device, staging.buffer, nil)
-  // defer vk.FreeMemory(device, staging.allocation_info.deviceMemory, nil)
-  // fmt.println("Created staging buffer.")
   defer vma.DestroyBuffer(vma_allocator, staging.buffer, staging.allocation) //TODO -- one day, why isn't this working?
 
-  // Copy from staging buffer to vertex buffer
-  mem.copy(staging.allocation_info.pMappedData, vertex_data, cast(int)render_data.vertex_buffer.size)
+  // Copy data to the staging buffer
+  mem.copy(staging.allocation_info.pMappedData, vertex_data, cast(int)vertex_buffer.size)
 
+  // Create the vertex buffer
   buffer_info.usage = {.TRANSFER_DST, .VERTEX_BUFFER}
   allocation_create_info.flags = {}
-  vkres = vma.CreateBuffer(vma_allocator, &buffer_info, &allocation_create_info, &render_data.vertex_buffer.buffer,
-    &render_data.vertex_buffer.allocation, &render_data.vertex_buffer.allocation_info)
+  vkres = vma.CreateBuffer(vma_allocator, &buffer_info, &allocation_create_info, &vertex_buffer.buffer,
+    &vertex_buffer.allocation, &vertex_buffer.allocation_info)
   if vkres != .SUCCESS {
     fmt.eprintf("Error: Failed to create vertex buffer!\n");
-    return .NotYetDetailed
+    destroy_resource_any(ctx, rh)
+    err = .NotYetDetailed
+    return
   }
 
-  // Copy buffers
+  // Queue Commands to copy the staging buffer to the vertex buffer
   _begin_single_time_commands(ctx) or_return
 
   copy_region := vk.BufferCopy {
     srcOffset = 0,
     dstOffset = 0,
-    size = render_data.vertex_buffer.size,
+    size = vertex_buffer.size,
   }
-  vk.CmdCopyBuffer(ctx.st_command_buffer, staging.buffer, render_data.vertex_buffer.buffer, 1, &copy_region)
+  vk.CmdCopyBuffer(ctx.st_command_buffer, staging.buffer, vertex_buffer.buffer, 1, &copy_region)
 
   _end_single_time_commands(ctx) or_return
 
-  // fmt.println("Created vertex buffer with size: ", render_data.vertex_buffer.size)
-
-  return .Success
+  return
 }
 
-create_index_buffer :: proc(using ctx: ^Context, render_data: ^RenderData, indices: ^u16, index_count: int) -> Error {
-  // render_data.index_buffer.length = index_count;
-  render_data.index_buffer.size = cast(vk.DeviceSize)(index_count * size_of(u16))
-  render_data.index_count = index_count
+create_index_buffer :: proc(using ctx: ^Context, indices: ^u16, index_count: int) -> (rh:IndexBufferResourceHandle, err: Error) {
+  // Create the resource
+  rh = auto_cast _create_resource(&ctx.resource_manager, .VertexBuffer) or_return
+  index_buffer: ^IndexBuffer = auto_cast get_resource(&ctx.resource_manager, rh) or_return
+
+  // Set
+  index_buffer.index_count = index_count
+  index_size: int
+  index_buffer.index_type = typeid_of(u16)
+  switch index_buffer.index_type {
+    case typeid_of(u16):
+      index_size = 2
+    case typeid_of(u32):
+      index_size = 4
+    case:
+      fmt.eprintln("create_index_buffer>Unsupported index type")
+      destroy_resource_any(ctx, rh)
+      err = .NotYetDetailed
+      return
+  }
+  index_buffer.size = auto_cast (index_size * index_count)
   
   // Staging buffer
   staging: Buffer
   buffer_create_info := vk.BufferCreateInfo{
     sType = .BUFFER_CREATE_INFO,
-    size  = auto_cast (size_of(u16) * index_count),
+    size  = index_buffer.size,
     usage = {.TRANSFER_SRC},
     sharingMode = .EXCLUSIVE,
   };
@@ -918,12 +942,12 @@ create_index_buffer :: proc(using ctx: ^Context, render_data: ^RenderData, indic
   defer vma.DestroyBuffer(vma_allocator, staging.buffer, staging.allocation) 
 
   // Copy from staging buffer to index buffer
-  mem.copy(staging.allocation_info.pMappedData, indices, auto_cast render_data.index_buffer.size)
+  mem.copy(staging.allocation_info.pMappedData, indices, auto_cast index_buffer.size)
 
   buffer_create_info.usage = {.TRANSFER_DST, .INDEX_BUFFER}
   allocation_create_info.flags = {}
-  vkres = vma.CreateBuffer(vma_allocator, &buffer_create_info, &allocation_create_info, &render_data.index_buffer.buffer,
-    &render_data.index_buffer.allocation, &render_data.index_buffer.allocation_info)
+  vkres = vma.CreateBuffer(vma_allocator, &buffer_create_info, &allocation_create_info, &index_buffer.buffer,
+    &index_buffer.allocation, &index_buffer.allocation_info)
   if vkres != .SUCCESS {
     fmt.eprintf("Error: Failed to create index buffer!\n");
     return .NotYetDetailed
@@ -935,7 +959,7 @@ create_index_buffer :: proc(using ctx: ^Context, render_data: ^RenderData, indic
   copy_region := vk.BufferCopy {
     srcOffset = 0,
     dstOffset = 0,
-    size = render_data.index_buffer.size,
+    size = index_buffer.size,
   }
   vk.CmdCopyBuffer(ctx.st_command_buffer, staging.buffer, render_data.index_buffer.buffer, 1, &copy_region)
 

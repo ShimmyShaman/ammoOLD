@@ -59,195 +59,195 @@ import vi "../../violin"
 //   return .Success
 // }
 
-load_textured_rect :: proc(ctx: ^vi.Context, render_pass: vi.RenderPassResourceHandle) -> (rd: vi.RenderData,
-    rp: vi.RenderProgram, err: vi.Error) {
+// load_textured_rect :: proc(ctx: ^vi.Context, render_pass: vi.RenderPassResourceHandle) -> (rd: vi.RenderData,
+//     rp: vi.RenderProgram, err: vi.Error) {
   
-    Vertex :: struct
-    {
-      pos: [2]f32,
-      uv: [2]f32,
-    }
+//     Vertex :: struct
+//     {
+//       pos: [2]f32,
+//       uv: [2]f32,
+//     }
     
-    vertices := [?]Vertex{
-      {{-0.85, -0.85}, {0.0, 0.0}},
-      {{-0.45, -0.85}, {1.0, 0.0}},
-      {{-0.45, -0.45}, {1.0, 1.0}},
-      {{-0.85, -0.45}, {0.0, 1.0}},
-    }
+//     vertices := [?]Vertex{
+//       {{-0.85, -0.85}, {0.0, 0.0}},
+//       {{-0.45, -0.85}, {1.0, 0.0}},
+//       {{-0.45, -0.45}, {1.0, 1.0}},
+//       {{-0.85, -0.45}, {0.0, 1.0}},
+//     }
     
-    indices := [?]u16{
-      0, 1, 2,
-      2, 3, 0,
-    }
+//     indices := [?]u16{
+//       0, 1, 2,
+//       2, 3, 0,
+//     }
   
-    bindings := [?]vk.DescriptorSetLayoutBinding {
-      vk.DescriptorSetLayoutBinding {
-        binding = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        stageFlags = { .FRAGMENT },
-        descriptorCount = 1,
-        pImmutableSamplers = nil,
-      },
-    }
+//     bindings := [?]vk.DescriptorSetLayoutBinding {
+//       vk.DescriptorSetLayoutBinding {
+//         binding = 1,
+//         descriptorType = .COMBINED_IMAGE_SAMPLER,
+//         stageFlags = { .FRAGMENT },
+//         descriptorCount = 1,
+//         pImmutableSamplers = nil,
+//       },
+//     }
   
-    inputs := [2]vi.InputAttribute {
-      {
-        format = .R32G32_SFLOAT,
-        location = 0,
-        offset = auto_cast offset_of(Vertex, pos),
-      },
-      {
-        format = .R32G32_SFLOAT,
-        location = 1,
-        offset = auto_cast offset_of(Vertex, uv),
-      },
-    }
+//     inputs := [2]vi.InputAttribute {
+//       {
+//         format = .R32G32_SFLOAT,
+//         location = 0,
+//         offset = auto_cast offset_of(Vertex, pos),
+//       },
+//       {
+//         format = .R32G32_SFLOAT,
+//         location = 1,
+//         offset = auto_cast offset_of(Vertex, uv),
+//       },
+//     }
   
-    rp_create_info := vi.RenderProgramCreateInfo {
-      pipeline_config = vi.PipelineCreateConfig {
-        vertex_shader_filepath = "res/shaders/tex2d.vert",
-        fragment_shader_filepath = "res/shaders/tex2d.frag",
-        render_pass = render_pass,
-      },
-      vertex_size = size_of(Vertex),
-      buffer_bindings = bindings[:],
-      input_attributes = inputs[:],
-    }
+//     rp_create_info := vi.RenderProgramCreateInfo {
+//       pipeline_config = vi.PipelineCreateConfig {
+//         vertex_shader_filepath = "res/shaders/tex2d.vert",
+//         fragment_shader_filepath = "res/shaders/tex2d.frag",
+//         render_pass = render_pass,
+//       },
+//       vertex_size = size_of(Vertex),
+//       buffer_bindings = bindings[:],
+//       input_attributes = inputs[:],
+//     }
   
-    rp = vi.create_render_program(ctx, &rp_create_info) or_return
-    // fmt.println("TODO dispose of render call specific resources & texture")
+//     rp = vi.create_render_program(ctx, &rp_create_info) or_return
+//     // fmt.println("TODO dispose of render call specific resources & texture")
   
-    // vertices = auto_cast &vertices[0],
-    // vertex_count = 4,
-    // indices = auto_cast &indices[0],
-    // index_count = 6,
-    // fmt.println("create_vertex_buffer")
-    vi.create_vertex_buffer(ctx, &rd, auto_cast &vertices[0], size_of(Vertex), 4) or_return
+//     // vertices = auto_cast &vertices[0],
+//     // vertex_count = 4,
+//     // indices = auto_cast &indices[0],
+//     // index_count = 6,
+//     // fmt.println("create_vertex_buffer")
+//     vi.create_vertex_buffer(ctx, &rd, auto_cast &vertices[0], size_of(Vertex), 4) or_return
   
-    // fmt.println("create_index_buffer")
-    vi.create_index_buffer(ctx, &rd, auto_cast &indices[0], 6) or_return
+//     // fmt.println("create_index_buffer")
+//     vi.create_index_buffer(ctx, &rd, auto_cast &indices[0], 6) or_return
   
-    texture := vi.load_texture_from_file(ctx, "res/textures/parthenon.jpg") or_return
-    // texture := vi.load_texture_from_file(ctx, "res/textures/cube_texture.png") or_return
-    append_elem(&rd.input, texture)
+//     texture := vi.load_texture_from_file(ctx, "res/textures/parthenon.jpg") or_return
+//     // texture := vi.load_texture_from_file(ctx, "res/textures/cube_texture.png") or_return
+//     append_elem(&rd.input, texture)
   
-    return
-  }
+//     return
+//   }
   
-  load_cube :: proc(ctx: ^vi.Context, render_pass: vi.RenderPassResourceHandle) -> (rd: vi.RenderData,
-    rp: vi.RenderProgram, err: vi.Error) {
+//   load_cube :: proc(ctx: ^vi.Context, render_pass: vi.RenderPassResourceHandle) -> (rd: vi.RenderData,
+//     rp: vi.RenderProgram, err: vi.Error) {
   
-    Vertex :: struct
-    {
-      pos: [3]f32,
-      uv: [2]f32,
-    }
+//     Vertex :: struct
+//     {
+//       pos: [3]f32,
+//       uv: [2]f32,
+//     }
     
-    OTH : f32 : 1.0 / 3.0
-    OTH2 : f32 : 2.0 / 3.0
+//     OTH : f32 : 1.0 / 3.0
+//     OTH2 : f32 : 2.0 / 3.0
   
-    cube_vertex_data := [?]f32{
-        // Left
-        -1.0, -1.0, -1.0, 0.0, OTH,
-        -1.0, -1.0, 1.0, 0.0, OTH2,
-        -1.0, 1.0, -1.0, 0.25, OTH,
-        -1.0, 1.0, 1.0, 0.25, OTH2,
-        // Right
-        1.0, -1.0, -1.0, 0.75, OTH,
-        1.0, 1.0, -1.0, 0.5, OTH,
-        1.0, -1.0, 1.0, 0.75, OTH2,
-        1.0, 1.0, 1.0, 0.5, OTH2,
-        // Back
-        -1.0, -1.0, -1.0, 1.0, OTH,
-        1.0, -1.0, -1.0, 0.75, OTH,
-        -1.0, -1.0, 1.0, 1, OTH2,
-        1.0, -1.0, 1.0, 0.75, OTH2,
-        // Front
-        -1.0, 1.0, -1.0, 0.25, OTH,
-        -1.0, 1.0, 1.0, 0.25, OTH2,
-        1.0, 1.0, -1.0, 0.5, OTH,
-        1.0, 1.0, 1.0, 0.5, OTH2,
-        // Top
-        -1.0, -1.0, 1.0, 0.75, 1.0,
-        1.0, -1.0, 1.0, 0.75, OTH2,
-        -1.0, 1.0, 1.0, 0.5, 1.0,
-        1.0, 1.0, 1.0, 0.5, OTH2,
-        // Bottom
-        -1.0, -1.0, -1.0, 0.75, 0.0,
-        -1.0, 1.0, -1.0, 0.5, 0.0,
-        1.0, -1.0, -1.0, 0.75, OTH,
-        1.0, 1.0, -1.0, 0.5, OTH,
-    }
+//     cube_vertex_data := [?]f32{
+//         // Left
+//         -1.0, -1.0, -1.0, 0.0, OTH,
+//         -1.0, -1.0, 1.0, 0.0, OTH2,
+//         -1.0, 1.0, -1.0, 0.25, OTH,
+//         -1.0, 1.0, 1.0, 0.25, OTH2,
+//         // Right
+//         1.0, -1.0, -1.0, 0.75, OTH,
+//         1.0, 1.0, -1.0, 0.5, OTH,
+//         1.0, -1.0, 1.0, 0.75, OTH2,
+//         1.0, 1.0, 1.0, 0.5, OTH2,
+//         // Back
+//         -1.0, -1.0, -1.0, 1.0, OTH,
+//         1.0, -1.0, -1.0, 0.75, OTH,
+//         -1.0, -1.0, 1.0, 1, OTH2,
+//         1.0, -1.0, 1.0, 0.75, OTH2,
+//         // Front
+//         -1.0, 1.0, -1.0, 0.25, OTH,
+//         -1.0, 1.0, 1.0, 0.25, OTH2,
+//         1.0, 1.0, -1.0, 0.5, OTH,
+//         1.0, 1.0, 1.0, 0.5, OTH2,
+//         // Top
+//         -1.0, -1.0, 1.0, 0.75, 1.0,
+//         1.0, -1.0, 1.0, 0.75, OTH2,
+//         -1.0, 1.0, 1.0, 0.5, 1.0,
+//         1.0, 1.0, 1.0, 0.5, OTH2,
+//         // Bottom
+//         -1.0, -1.0, -1.0, 0.75, 0.0,
+//         -1.0, 1.0, -1.0, 0.5, 0.0,
+//         1.0, -1.0, -1.0, 0.75, OTH,
+//         1.0, 1.0, -1.0, 0.5, OTH,
+//     }
   
-    index_data := [?]u16 {
-        0,  1,  2,  2,  1,  3,  4,  5,  6,  6,  5,  7,  8,  9,  10, 10, 9,  11,
-        12, 13, 14, 14, 13, 15, 16, 17, 18, 18, 17, 19, 20, 21, 22, 22, 21, 23,
-    }
+//     index_data := [?]u16 {
+//         0,  1,  2,  2,  1,  3,  4,  5,  6,  6,  5,  7,  8,  9,  10, 10, 9,  11,
+//         12, 13, 14, 14, 13, 15, 16, 17, 18, 18, 17, 19, 20, 21, 22, 22, 21, 23,
+//     }
   
-    bindings := [?]vk.DescriptorSetLayoutBinding {
-      vk.DescriptorSetLayoutBinding {
-        binding = 0,
-        descriptorType = .UNIFORM_BUFFER,
-        stageFlags = { .VERTEX },
-        descriptorCount = 1,
-        pImmutableSamplers = nil,
-      },
-      vk.DescriptorSetLayoutBinding {
-        binding = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        stageFlags = { .FRAGMENT },
-        descriptorCount = 1,
-        pImmutableSamplers = nil,
-      },
-    }
+//     bindings := [?]vk.DescriptorSetLayoutBinding {
+//       vk.DescriptorSetLayoutBinding {
+//         binding = 0,
+//         descriptorType = .UNIFORM_BUFFER,
+//         stageFlags = { .VERTEX },
+//         descriptorCount = 1,
+//         pImmutableSamplers = nil,
+//       },
+//       vk.DescriptorSetLayoutBinding {
+//         binding = 1,
+//         descriptorType = .COMBINED_IMAGE_SAMPLER,
+//         stageFlags = { .FRAGMENT },
+//         descriptorCount = 1,
+//         pImmutableSamplers = nil,
+//       },
+//     }
   
-    inputs := [2]vi.InputAttribute {
-      {
-        format = .R32G32B32_SFLOAT,
-        location = 0,
-        offset = auto_cast offset_of(Vertex, pos),
-      },
-      {
-        format = .R32G32_SFLOAT,
-        location = 1,
-        offset = auto_cast offset_of(Vertex, uv),
-      },
-    }
+//     inputs := [2]vi.InputAttribute {
+//       {
+//         format = .R32G32B32_SFLOAT,
+//         location = 0,
+//         offset = auto_cast offset_of(Vertex, pos),
+//       },
+//       {
+//         format = .R32G32_SFLOAT,
+//         location = 1,
+//         offset = auto_cast offset_of(Vertex, uv),
+//       },
+//     }
   
-    rp_create_info := vi.RenderProgramCreateInfo {
-      pipeline_config = vi.PipelineCreateConfig {
-        vertex_shader_filepath = "res/shaders/tex3d.vert",
-        fragment_shader_filepath = "res/shaders/tex3d.frag",
-        render_pass = render_pass,
-      },
-      vertex_size = size_of(Vertex),
-      buffer_bindings = bindings[:],
-      input_attributes = inputs[:],
-    }
+//     rp_create_info := vi.RenderProgramCreateInfo {
+//       pipeline_config = vi.PipelineCreateConfig {
+//         vertex_shader_filepath = "res/shaders/tex3d.vert",
+//         fragment_shader_filepath = "res/shaders/tex3d.frag",
+//         render_pass = render_pass,
+//       },
+//       vertex_size = size_of(Vertex),
+//       buffer_bindings = bindings[:],
+//       input_attributes = inputs[:],
+//     }
   
-    // Create ViewProj Matrix
-    view := la.mat4LookAt(la.vec3{0, 0, 3}, la.vec3{0, 0, 0}, la.vec3{0, 1, 0})
-    proj := la.mat4Perspective(72, cast(f32)ctx.swap_chain.extent.width / cast(f32)ctx.swap_chain.extent.height, 0.1, 100)
-    // vp := view * proj
-    vp := proj * view
+//     // Create ViewProj Matrix
+//     view := la.mat4LookAt(la.vec3{0, 0, 3}, la.vec3{0, 0, 0}, la.vec3{0, 1, 0})
+//     proj := la.mat4Perspective(72, cast(f32)ctx.swap_chain.extent.width / cast(f32)ctx.swap_chain.extent.height, 0.1, 100)
+//     // vp := view * proj
+//     vp := proj * view
   
-    // pvp := new_clone(vp)
-    // // pvp := vi.allocate_input(ctx, type_of(la.mat4))
-    // // vi.set_input_data(pvp, auto_cast vp)
-    // append_elem(&rd.input, pvp)
+//     // pvp := new_clone(vp)
+//     // // pvp := vi.allocate_input(ctx, type_of(la.mat4))
+//     // // vi.set_input_data(pvp, auto_cast vp)
+//     // append_elem(&rd.input, pvp)
   
-    pvp := vi.create_uniform_buffer(ctx, size_of(la.mat4), .Dynamic) or_return
-    vi.write_to_buffer(ctx, pvp, &vp, size_of(la.mat4))
-    append_elem(&rd.input, pvp)
+//     pvp := vi.create_uniform_buffer(ctx, size_of(la.mat4), .Dynamic) or_return
+//     vi.write_to_buffer(ctx, pvp, &vp, size_of(la.mat4))
+//     append_elem(&rd.input, pvp)
   
-    rp = vi.create_render_program(ctx, &rp_create_info) or_return
+//     rp = vi.create_render_program(ctx, &rp_create_info) or_return
   
-    vi.create_vertex_buffer(ctx, &rd, auto_cast &cube_vertex_data[0], size_of(Vertex), len(cube_vertex_data) / 5) or_return
+//     vi.create_vertex_buffer(ctx, &rd, auto_cast &cube_vertex_data[0], size_of(Vertex), len(cube_vertex_data) / 5) or_return
   
-    vi.create_index_buffer(ctx, &rd, auto_cast &index_data[0], len(index_data)) or_return
+//     vi.create_index_buffer(ctx, &rd, auto_cast &index_data[0], len(index_data)) or_return
   
-    texture := vi.load_texture_from_file(ctx, "res/textures/cube_texture.png") or_return
-    append_elem(&rd.input, texture)
+//     texture := vi.load_texture_from_file(ctx, "res/textures/cube_texture.png") or_return
+//     append_elem(&rd.input, texture)
   
-    return
-  }
+//     return
+//   }

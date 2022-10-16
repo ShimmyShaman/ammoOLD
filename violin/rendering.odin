@@ -269,7 +269,8 @@ _set_scissor_cmd :: proc(command_buffer: vk.CommandBuffer, x: i32, y: i32, width
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram, render_data: ^RenderData) -> Error {
+draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram, vertex_buffer: VertexBuffer,
+  index_buffer: IndexBuffer, parameters: []ResourceHandle) -> Error {
   // Setup viewport and clip
   _set_viewport_cmd(command_buffer, 0, 0, auto_cast vctx.swap_chain.extent.width,
     auto_cast vctx.swap_chain.extent.height)
