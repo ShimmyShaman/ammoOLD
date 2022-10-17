@@ -18,7 +18,7 @@ main :: proc() {
   time.sleep(time.Second * 1)
 
   // Initialize Renderer
-  vctx, err := vi.init()
+  vctx, err := vi.init("../")
   defer vi.quit(&vctx)
   if err != .Success {
     fmt.println("init problem:", err)
@@ -61,13 +61,13 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
   // }
   // defer vi.destroy_resource(ctx, rpass2d)
 
-  ui_handle: vi.UIRenderResourceHandle
-  ui_handle, err = vi.init_ui_render_resources(ctx, { .IsPresent }) // .HasPreviousColorPass,
+  handle_2d: vi.TwoDRenderResourceHandle
+  handle_2d, err = vi.init_twod_render_resources(ctx, { .IsPresent }) // .HasPreviousColorPass,
   if err != .Success {
-    fmt.println("create_render_pass ui error")
+    fmt.println("create_render_pass 2D error")
     return .NotYetDetailed
   }
-  defer vi.destroy_resource(ctx, ui_handle)
+  defer vi.destroy_resource(ctx, handle_2d)
  
   // Resources
   // rd2: vi.RenderData
@@ -80,15 +80,15 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
   //   return .NotYetDetailed
   // }
   
-  rd3: vi.RenderData
-  rp3: vi.RenderProgram
-  rd3, rp3, err = load_cube(ctx, rpass3d)
-  defer vi.destroy_render_program(ctx, &rp3)
-  defer vi.destroy_render_data(ctx, &rd3)
-  if err != .Success {
-    fmt.println("load_cube error")
-    return .NotYetDetailed
-  }
+  // rd3: vi.RenderData
+  // rp3: vi.RenderProgram
+  // rd3, rp3, err = load_cube(ctx, rpass3d)
+  // defer vi.destroy_render_program(ctx, &rp3)
+  // defer vi.destroy_render_data(ctx, &rd3)
+  // if err != .Success {
+  //   fmt.println("load_cube error")
+  //   return .NotYetDetailed
+  // }
 
   // Variables
   loop_start := time.now()
@@ -180,11 +180,11 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
 
     // if vi.draw_indexed(rctx, &rp2, &rd2) != .Success do break loop
 
-    if vi.begin_ui_render_pass(rctx, ui_handle) != .Success do return .NotYetDetailed
+    if vi.begin_render_pass_2d(rctx, handle_2d) != .Success do return .NotYetDetailed
 
     sq := mu.Rect{100, 100, 300, 200}
     co := mu.Color{220, 250, 15, 255}
-    vi.draw_colored_rect(rctx, ui_handle, &sq, &co)
+    vi.draw_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co)
     // cmd : ^mu.Command
     // for mu.next_command(&muc, &cmd) {
     //   fmt.println("next_command:", cmd)

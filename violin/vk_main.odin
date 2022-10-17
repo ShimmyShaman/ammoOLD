@@ -36,6 +36,7 @@ Error :: enum {
 }
 
 Context :: struct {
+  violin_package_relative_path: string,
   window:   ^sdl2.Window,
 
   vma_allocator: vma.Allocator,
@@ -138,10 +139,11 @@ VALIDATION_LAYERS := [?]cstring {
   "VK_LAYER_KHRONOS_validation",
 }
 
-init :: proc() -> (ctx: Context, err: Error) {
+init :: proc(violin_package_relative_path: string) -> (ctx: Context, err: Error) {
   using sdl2
 
   err = .Success
+  ctx.violin_package_relative_path = strings.clone(violin_package_relative_path)
 
   // Init
   result := auto_cast Init(INIT_VIDEO)
@@ -218,19 +220,8 @@ quit :: proc(using ctx: ^Context) {
   sdl2.DestroyWindow(window);
   sdl2.Vulkan_UnloadLibrary()
   sdl2.Quit()
-}
 
-destroy_render_data :: proc(using ctx: ^Context, render_data: ^RenderData) {
-  vk.DeviceWaitIdle(device); // TODO -- will 'probably' need better synchronization
-  
-  vma.DestroyBuffer(vma_allocator, render_data.vertex_buffer.buffer, render_data.vertex_buffer.allocation)
-  vma.DestroyBuffer(vma_allocator, render_data.index_buffer.buffer, render_data.index_buffer.allocation)
-  
-  for rh in render_data.input {
-    destroy_resource(ctx, rh)
-  }
-
-  delete(render_data.input)
+  delete_string(ctx.violin_package_relative_path)
 }
 
 destroy_render_program :: proc(using ctx: ^Context, render_program: ^RenderProgram) {

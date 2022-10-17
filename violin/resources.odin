@@ -31,19 +31,21 @@ ResourceHandle :: distinct int
 VertexBufferResourceHandle :: distinct ResourceHandle
 IndexBufferResourceHandle :: distinct ResourceHandle
 RenderPassResourceHandle :: distinct ResourceHandle
-UIRenderResourceHandle :: distinct ResourceHandle
+TwoDRenderResourceHandle :: distinct ResourceHandle
 
 ResourceKind :: enum {
   Buffer = 1,
   Texture,
   DepthBuffer,
   RenderPass,
-  UIRenderResource,
+  TwoDRenderResource,
+  VertexBuffer,
+  IndexBuffer,
 }
 
 Resource :: struct {
   kind: ResourceKind,
-  data: union { Buffer, Texture, DepthBuffer, RenderPass, UIRenderResource },
+  data: union { Buffer, Texture, DepthBuffer, RenderPass, TwoDRenderResource, VertexBuffer, IndexBuffer },
 }
 
 ImageSamplerUsage :: enum {
@@ -80,15 +82,15 @@ DepthBuffer :: struct {
 
 VertexBuffer :: struct {
   using _buf: Buffer,
-  vertices: ^f32,
+  vertices: ^f32, // TODO -- REMOVE THIS ?
   vertex_count: int,
 }
 
 IndexBuffer :: struct {
   using _buf: Buffer,
-  indices: rawptr,
+  indices: rawptr, // TODO -- REMOVE THIS ?
   index_count: int,
-  index_type: typeid,
+  index_type: vk.IndexType,
 }
 
 RenderPass :: struct {
@@ -99,9 +101,12 @@ RenderPass :: struct {
   depth_buffer_rh: ResourceHandle,
 }
 
-UIRenderResource :: struct {
+TwoDRenderResource :: struct {
   render_pass: RenderPassResourceHandle,
   colored_rect_render_program: RenderProgram,
+  rect_vertex_buffer: VertexBufferResourceHandle,
+  rect_index_buffer: IndexBufferResourceHandle,
+  colored_rect_uniform_buffer: ResourceHandle,
 }
 
 // TODO -- this is a bit of a hack, but it works for now
@@ -151,7 +156,7 @@ _create_resource :: proc(using rm: ^ResourceManager, resource_kind: ResourceKind
   defer sync.unlock(&rm._mutex)
 
   switch resource_kind {
-    case .Texture, .Buffer, .DepthBuffer, .RenderPass, .UIRenderResource:
+    case .Texture, .Buffer, .DepthBuffer, .RenderPass, .TwoDRenderResource, .VertexBuffer, .IndexBuffer:
       rh = resource_index
       resource_index += 1
       res : ^Resource = auto_cast mem.alloc(size_of(Resource))
@@ -182,12 +187,7 @@ get_resource_render_pass :: proc(using rm: ^ResourceManager, rh: RenderPassResou
   return
 }
 
-get_resource_ui :: proc(using rm: ^ResourceManager, rh: UIRenderResourceHandle) -> (ptr: ^UIRenderResource, err: Error) {
-  ptr = auto_cast get_resource_any(rm, auto_cast rh) or_return
-  return
-}
-
-get_resource :: proc {get_resource_any, get_resource_render_pass, get_resource_ui}
+get_resource :: proc {get_resource_any, get_resource_render_pass}
 
 destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
   res := resource_manager.resource_map[rh]
@@ -228,11 +228,15 @@ destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
       vk.DestroyImageView(device, db.view, nil)
       vk.DestroyImage(device, db.image, nil)
       vk.FreeMemory(device, db.memory, nil)
-    case .UIRenderResource:
-      ui: ^UIRenderResource = auto_cast &res.data
+    case .TwoDRenderResource:
+      ui: ^TwoDRenderResource = auto_cast &res.data
       
       destroy_resource(ctx, ui.render_pass)
       destroy_render_program(ctx, &ui.colored_rect_render_program)
+    case .VertexBuffer, .IndexBuffer:
+      vb: ^VertexBuffer = auto_cast &res.data
+      
+      vma.DestroyBuffer(vma_allocator, vb.buffer, vb.allocation)
     case:
       fmt.println("Resource type not supported:", res.kind)
       return .NotYetDetailed
@@ -252,7 +256,7 @@ destroy_render_pass :: proc(using ctx: ^Context, rh: RenderPassResourceHandle) -
   return destroy_resource_any(ctx, auto_cast rh)
 }
 
-destroy_ui_render_resource :: proc(using ctx: ^Context, rh: UIRenderResourceHandle) -> Error {
+destroy_ui_render_resource :: proc(using ctx: ^Context, rh: TwoDRenderResourceHandle) -> Error {
   return destroy_resource_any(ctx, auto_cast rh)
 }
 
@@ -837,11 +841,11 @@ create_vertex_buffer :: proc(using ctx: ^Context, vertex_data: rawptr, vertex_si
   vertex_count: int) -> (rh: VertexBufferResourceHandle, err: Error) {
   // Create the resource
   rh = auto_cast _create_resource(&ctx.resource_manager, .VertexBuffer) or_return
-  vertex_buffer: ^VertexBuffer = auto_cast get_resource(&ctx.resource_manager, rh) or_return
+  vertex_buffer: ^VertexBuffer = auto_cast get_resource_any(&ctx.resource_manager, auto_cast rh) or_return
 
   // Set
   vertex_buffer.vertex_count = vertex_count
-  vertex_buffer.size = auto_cast vertex_size_in_bytes * vertex_count
+  vertex_buffer.size = auto_cast (vertex_size_in_bytes * vertex_count)
 
   // Staging buffer
   staging: Buffer
@@ -860,7 +864,7 @@ create_vertex_buffer :: proc(using ctx: ^Context, vertex_data: rawptr, vertex_si
     &staging.allocation, &staging.allocation_info)
   if vkres != .SUCCESS {
     fmt.eprintf("Error: Failed to create staging buffer!\n");
-    destroy_resource_any(ctx, rh)
+    destroy_resource_any(ctx, auto_cast rh)
     err = .NotYetDetailed
     return
   }
@@ -876,7 +880,7 @@ create_vertex_buffer :: proc(using ctx: ^Context, vertex_data: rawptr, vertex_si
     &vertex_buffer.allocation, &vertex_buffer.allocation_info)
   if vkres != .SUCCESS {
     fmt.eprintf("Error: Failed to create vertex buffer!\n");
-    destroy_resource_any(ctx, rh)
+    destroy_resource_any(ctx, auto_cast rh)
     err = .NotYetDetailed
     return
   }
@@ -899,20 +903,20 @@ create_vertex_buffer :: proc(using ctx: ^Context, vertex_data: rawptr, vertex_si
 create_index_buffer :: proc(using ctx: ^Context, indices: ^u16, index_count: int) -> (rh:IndexBufferResourceHandle, err: Error) {
   // Create the resource
   rh = auto_cast _create_resource(&ctx.resource_manager, .VertexBuffer) or_return
-  index_buffer: ^IndexBuffer = auto_cast get_resource(&ctx.resource_manager, rh) or_return
+  index_buffer: ^IndexBuffer = auto_cast get_resource_any(&ctx.resource_manager, auto_cast rh) or_return
 
   // Set
   index_buffer.index_count = index_count
   index_size: int
-  index_buffer.index_type = typeid_of(u16)
-  switch index_buffer.index_type {
-    case typeid_of(u16):
+  index_buffer.index_type = .UINT16 // TODO -- support 32 bit indices
+  #partial switch index_buffer.index_type {
+    case .UINT16:
       index_size = 2
-    case typeid_of(u32):
+    case .UINT32:
       index_size = 4
     case:
       fmt.eprintln("create_index_buffer>Unsupported index type")
-      destroy_resource_any(ctx, rh)
+      destroy_resource_any(ctx, auto_cast rh)
       err = .NotYetDetailed
       return
   }
@@ -935,7 +939,8 @@ create_index_buffer :: proc(using ctx: ^Context, indices: ^u16, index_count: int
     &staging.allocation, &staging.allocation_info)
   if vkres != .SUCCESS {
     fmt.eprintf("Error: Failed to create staging buffer!\n");
-    return .NotYetDetailed
+    err = .NotYetDetailed
+    return
   }
   // defer vk.DestroyBuffer(device, staging.buffer, nil)
   // defer vk.FreeMemory(device, staging.allocation_info.deviceMemory, nil)
@@ -950,7 +955,8 @@ create_index_buffer :: proc(using ctx: ^Context, indices: ^u16, index_count: int
     &index_buffer.allocation, &index_buffer.allocation_info)
   if vkres != .SUCCESS {
     fmt.eprintf("Error: Failed to create index buffer!\n");
-    return .NotYetDetailed
+    err = .NotYetDetailed
+    return
   }
 
   // Copy buffers
@@ -961,11 +967,11 @@ create_index_buffer :: proc(using ctx: ^Context, indices: ^u16, index_count: int
     dstOffset = 0,
     size = index_buffer.size,
   }
-  vk.CmdCopyBuffer(ctx.st_command_buffer, staging.buffer, render_data.index_buffer.buffer, 1, &copy_region)
+  vk.CmdCopyBuffer(ctx.st_command_buffer, staging.buffer, index_buffer.buffer, 1, &copy_region)
 
   _end_single_time_commands(ctx) or_return
 
-  return .Success
+  return
 }
 
 // create_index_buffer :: proc(using ctx: ^Context, render_data: ^RenderData, indices: ^u16, index_count: int) -> Error {

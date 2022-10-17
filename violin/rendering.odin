@@ -269,8 +269,12 @@ _set_scissor_cmd :: proc(command_buffer: vk.CommandBuffer, x: i32, y: i32, width
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram, vertex_buffer: VertexBuffer,
-  index_buffer: IndexBuffer, parameters: []ResourceHandle) -> Error {
+draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram, vertex_buffer: VertexBufferResourceHandle,
+  index_buffer: IndexBufferResourceHandle, parameters: []ResourceHandle) -> Error {
+  // Obtain the resources
+  vbuf: ^VertexBuffer = auto_cast get_resource(&rctx.vctx.resource_manager, cast(ResourceHandle) vertex_buffer) or_return
+  ibuf: ^IndexBuffer = auto_cast get_resource(&rctx.vctx.resource_manager, cast(ResourceHandle) index_buffer) or_return
+
   // Setup viewport and clip
   _set_viewport_cmd(command_buffer, 0, 0, auto_cast vctx.swap_chain.extent.width,
     auto_cast vctx.swap_chain.extent.height)
@@ -303,13 +307,15 @@ draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram,
   desc_set := descriptor_sets[descriptor_set_index]
   descriptor_sets_index += set_alloc_info.descriptorSetCount
 
+  // TODO check parameters length vs layout bindings?
+
   // Describe each binding
   // fmt.println("render_program.layout_bindings:", render_program.layout_bindings)
   for i in 0..<len(render_program.layout_bindings) {
     #partial switch render_program.layout_bindings[i].descriptorType {
       case .UNIFORM_BUFFER: {
         // TODO -- refactor / performance check / integrate mrt_write_desc_and_queue_render_data concept into this
-        buffer: ^Buffer = auto_cast get_resource(&rctx.vctx.resource_manager, render_data.input[i]) or_return
+        buffer: ^Buffer = auto_cast get_resource(&rctx.vctx.resource_manager, parameters[i]) or_return
 
         buffer_info := &buffer_infos[i]
         buffer_info.buffer = buffer.buffer
@@ -330,7 +336,7 @@ draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram,
       }
       case .COMBINED_IMAGE_SAMPLER: {
         // Element Fragment Shader Combined Image Sampler
-        image_sampler: ^Texture = auto_cast get_resource(&rctx.vctx.resource_manager, render_data.input[i]) or_return
+        image_sampler: ^Texture = auto_cast get_resource(&rctx.vctx.resource_manager, parameters[i]) or_return
 
         image_sampler_info := &image_sampler_infos[i]
         image_sampler_info.imageLayout = .SHADER_READ_ONLY_OPTIMAL
@@ -361,7 +367,7 @@ draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram,
 
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, render_program.pipeline.handle)
 
-  vk.CmdBindIndexBuffer(command_buffer, render_data.index_buffer.buffer, 0, .UINT16) // TODO -- support other index types
+  vk.CmdBindIndexBuffer(command_buffer, ibuf.buffer, 0, ibuf.index_type) // TODO -- support other index types
 
   // const VkDeviceSize offsets[1] = {0};
   // vkCmdBindVertexBuffers(command_buffer, 0, 1, &cmd->render_program.data->vertices->buf, offsets);
@@ -370,7 +376,7 @@ draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram,
   // if (!index_draw_count)
   //   index_draw_count = cmd->render_program.data->indices->capacity;
   offsets: vk.DeviceSize = 0
-  vk.CmdBindVertexBuffers(command_buffer, 0, 1, &render_data.vertex_buffer.buffer, &offsets)
+  vk.CmdBindVertexBuffers(command_buffer, 0, 1, &vbuf.buffer, &offsets)
   // TODO -- specific index draw count
 
   // // printf("index_draw_count=%i\n", index_draw_count);
@@ -379,7 +385,7 @@ draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram,
   // //        cmd->render_program.data->specific_index_draw_count);
 
   // vkCmdDrawIndexed(command_buffer, index_draw_count, 1, 0, 0, 0);
-  vk.CmdDrawIndexed(command_buffer, auto_cast render_data.index_count, 1, 0, 0, 0) // TODO -- index_count as u32?
+  vk.CmdDrawIndexed(command_buffer, auto_cast ibuf.index_count, 1, 0, 0, 0) // TODO -- index_count as u32?
   // fmt.print(render_data.index_count, ":")
 
   return .Success
