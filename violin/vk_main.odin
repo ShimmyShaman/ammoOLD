@@ -75,7 +75,7 @@ Swapchain :: struct {
 }
 
 RenderContext :: struct {
-  vctx: ^Context,
+  ctx: ^Context,
 
   mutex: sync.Mutex,
   status: FrameRenderStateKind,
@@ -139,10 +139,12 @@ VALIDATION_LAYERS := [?]cstring {
   "VK_LAYER_KHRONOS_validation",
 }
 
-init :: proc(violin_package_relative_path: string) -> (ctx: Context, err: Error) {
+init :: proc(violin_package_relative_path: string) -> (ctx: ^Context, err: Error) {
   using sdl2
 
   err = .Success
+
+  ctx = new(Context)
   ctx.violin_package_relative_path = strings.clone(violin_package_relative_path)
 
   // Init
@@ -164,7 +166,7 @@ init :: proc(violin_package_relative_path: string) -> (ctx: Context, err: Error)
   // Window
   ctx.window = CreateWindow("OdWin", WINDOWPOS_UNDEFINED, WINDOWPOS_UNDEFINED, 960, 600, WINDOW_SHOWN | WINDOW_VULKAN)
 
-  init_vulkan(&ctx) or_return
+  init_vulkan(ctx) or_return
   return
 }
 
@@ -193,7 +195,7 @@ init_vulkan :: proc(using ctx: ^Context) -> Error {
   for q, f in &queues do vk.GetDeviceQueue(device, u32(queue_indices[f]), 0, &q)
 
   for i in 0..<MAX_FRAMES_IN_FLIGHT {
-    _render_contexts[i].vctx = ctx
+    _render_contexts[i].ctx = ctx
     _render_contexts[i].status = .Idle
   }
   
@@ -222,6 +224,7 @@ quit :: proc(using ctx: ^Context) {
   sdl2.Quit()
 
   delete_string(ctx.violin_package_relative_path)
+  free(ctx)
 }
 
 destroy_render_program :: proc(using ctx: ^Context, render_program: ^RenderProgram) {

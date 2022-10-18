@@ -17,8 +17,8 @@ main :: proc() {
   time.sleep(time.Second * 1)
 
   // Initialize Renderer
-  vctx, err := vi.init()
-  defer vi.quit(&vctx)
+  ctx, err := vi.init()
+  defer vi.quit(&ctx)
   if err != .Success {
     fmt.println("init problem:", err)
     return
@@ -30,7 +30,7 @@ main :: proc() {
   game_data.net.is_active = true
   thread := thread.create_and_start_with_data(&game_data.net, begin_client_network_connection)
 
-  _begin_game_loop(&vctx, &game_data)
+  _begin_game_loop(&ctx, &game_data)
 
   game_data.net.should_close = true
   for game_data.net.is_active {
@@ -113,10 +113,10 @@ _begin_game_loop :: proc(ctx: ^vi.Context, game_data: ^GameData) -> Error {
       }
     }
 
-    // fmt.println("framebuffers_3d", len(vctx.framebuffers_3d))
-    // fmt.println("framebuffers_2d", len(vctx.swap_chain.present_framebuffers))
-    // fmt.println("image_views", len(vctx.swap_chain.image_views))
-    // fmt.println("images", len(vctx.swap_chain.images))
+    // fmt.println("framebuffers_3d", len(ctx.framebuffers_3d))
+    // fmt.println("framebuffers_2d", len(ctx.swap_chain.present_framebuffers))
+    // fmt.println("image_views", len(ctx.swap_chain.image_views))
+    // fmt.println("images", len(ctx.swap_chain.images))
 
     // FPS
     now = time.now()
@@ -154,7 +154,7 @@ _begin_game_loop :: proc(ctx: ^vi.Context, game_data: ^GameData) -> Error {
     // // eye.z *= sqd
     // // eye := la.vec3{-3.0, 0, 0}
     // view := la.mat4LookAt(eye, la.vec3{0, 0, 0}, la.vec3{0, -1, 0})
-    // proj := la.mat4Perspective(0.7, cast(f32)vctx.swap_chain.extent.width / cast(f32)vctx.swap_chain.extent.height, 0.1, 100)
+    // proj := la.mat4Perspective(0.7, cast(f32)ctx.swap_chain.extent.width / cast(f32)ctx.swap_chain.extent.height, 0.1, 100)
     // vp := proj * view
     // // vp := view * proj
     // vi.write_to_buffer(ctx, pvp, &vp, size_of(la.mat4))

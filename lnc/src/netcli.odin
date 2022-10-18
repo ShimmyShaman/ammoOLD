@@ -33,10 +33,12 @@ begin_client_network_connection :: proc(arg: rawptr) {
   // Cast
   cli: HostInfo
   cli.netdata = auto_cast arg
+  cli.netdata.status = .Initializing
   
   res := enet.initialize()
   if res != 0 {
     fmt.println("[C] failed to initialize enet")
+    cli.netdata.status = .Shutdown
     return
   }
   defer enet.deinitialize()
@@ -44,6 +46,7 @@ begin_client_network_connection :: proc(arg: rawptr) {
   cli.host = enet.host_create(nil, 1, 2, 0, 0)
   if cli.host == nil {
     fmt.println("[C] cli.host create failed!")
+    cli.netdata.status = .Shutdown
     return
   }
   defer enet.host_destroy(cli.host)
@@ -53,7 +56,10 @@ begin_client_network_connection :: proc(arg: rawptr) {
   }
   enet.address_set_host_ip(&server_address, "127.0.0.1")
 
-  if cli.netdata.should_close do return
+  if cli.netdata.should_close {
+    cli.netdata.status = .Shutdown
+    return
+  }
 
   // Attempt to connect to the server
   cli.netdata.status = .Connecting
@@ -61,6 +67,7 @@ begin_client_network_connection :: proc(arg: rawptr) {
   cli.server = enet.host_connect(cli.host, &server_address, 2, 0)
   if cli.server == nil {
     fmt.println("[C] peer host_connect failed!")
+    cli.netdata.status = .Shutdown
     return
   }
 
@@ -70,7 +77,6 @@ begin_client_network_connection :: proc(arg: rawptr) {
 
   // Disconnect & confirm
   _force_disconnect(&cli)
-  cli.netdata.is_active = false
   cli.netdata.status = .Shutdown
 }
 

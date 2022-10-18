@@ -18,8 +18,8 @@ main :: proc() {
   time.sleep(time.Second * 1)
 
   // Initialize Renderer
-  vctx, err := vi.init("../")
-  defer vi.quit(&vctx)
+  ctx, err := vi.init("../")
+  defer vi.quit(ctx)
   if err != .Success {
     fmt.println("init problem:", err)
     return
@@ -28,15 +28,21 @@ main :: proc() {
   launcher_data: LauncherData
 
   // Begin Network Connection
-  launcher_data.net.is_active = true
   thread := thread.create_and_start_with_data(&launcher_data.net, begin_client_network_connection)
 
-  _begin_game_loop(&vctx, &launcher_data)
+  _begin_game_loop(ctx, &launcher_data)
 
+  retries := 4000
   launcher_data.net.should_close = true
-  for launcher_data.net.is_active {
+  for launcher_data.net.status != .Shutdown {
     time.sleep(time.Millisecond * 10)
+    retries -= 10
+    if retries <= 0 {
+      fmt.println("Network Thread is not closing, exiting anyway. TODO -- fix this")
+      break
+    }
   }
+  // vi._resource_manager_report(&ctx.resource_manager)
 }
 
 _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Error {
@@ -105,7 +111,7 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
   mu.init(&muc)
   muc.text_width = get_text_width_for_font
   muc.text_height = get_text_height_for_font
-
+  
   // Loop
   fmt.println("Init Success. Entering Game Loop...")
   loop : for {
@@ -115,10 +121,10 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
       break loop
     }
 
-    // fmt.println("framebuffers_3d", len(vctx.framebuffers_3d))
-    // fmt.println("framebuffers_2d", len(vctx.swap_chain.present_framebuffers))
-    // fmt.println("image_views", len(vctx.swap_chain.image_views))
-    // fmt.println("images", len(vctx.swap_chain.images))
+    // fmt.println("framebuffers_3d", len(ctx.framebuffers_3d))
+    // fmt.println("framebuffers_2d", len(ctx.swap_chain.present_framebuffers))
+    // fmt.println("image_views", len(ctx.swap_chain.image_views))
+    // fmt.println("images", len(ctx.swap_chain.images))
 
     // FPS
     now = time.now()
@@ -156,7 +162,10 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     // --- ### Draw the Frame ### ---
     // post_processing = false // So there is no intemediary render target draw... Everything is straight to present
     rctx, verr = vi.begin_present(ctx)
-    if verr != .Success do return .NotYetDetailed
+    if verr != .Success {
+      fmt.println("begin_present error")
+      return .NotYetDetailed
+    }
 
     // 3D
     // if vi.begin_render_pass(rctx, rpass3d) != .Success do break loop
@@ -168,7 +177,7 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     // // eyevent.z *= sqd
     // // eye := la.vec3{-3.0, 0, 0}
     // view := la.mat4LookAt(eye, la.vec3{0, 0, 0}, la.vec3{0, -1, 0})
-    // proj := la.mat4Perspective(0.7, cast(f32)vctx.swap_chain.extent.width / cast(f32)vctx.swap_chain.extent.height, 0.1, 100)
+    // proj := la.mat4Perspective(0.7, cast(f32)ctx.swap_chain.extent.width / cast(f32)ctx.swap_chain.extent.height, 0.1, 100)
     // vp := proj * view
     // // vp := view * proj
     // vi.write_to_buffer(ctx, pvp, &vp, size_of(la.mat4))
@@ -183,7 +192,7 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     if vi.begin_render_pass_2d(rctx, handle_2d) != .Success do return .NotYetDetailed
 
     sq := mu.Rect{100, 100, 300, 200}
-    co := mu.Color{220, 250, 15, 255}
+    co := mu.Color{220, 0, 15, 255}
     vi.draw_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co)
     // cmd : ^mu.Command
     // for mu.next_command(&muc, &cmd) {
@@ -206,12 +215,14 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     //   }
     // }
 
-    if vi.end_present(rctx) != .Success do break loop
- 
+    if vi.end_present(rctx) != .Success {
+      fmt.println("end_present error")
+      return .NotYetDetailed
+    }
     recent_frame_count += 1
 
     // Auto-Leave
-     if recent_frame_count > 0 do break
+    //  if recent_frame_count > 0 do break
     // if time.duration_seconds(time.diff(loop_start, now)) >= 1.5 {
     //   break loop
     // }

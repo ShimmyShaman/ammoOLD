@@ -6,7 +6,9 @@ Error :: enum {
 }
 
 NetworkStatus :: enum {
-  NotConnected = 0,
+  Uninitialized = 0,
+  Idle,
+  Initializing,
   Connecting,
   Connected,
   Disconnected,
@@ -14,9 +16,7 @@ NetworkStatus :: enum {
 }
 
 NetworkData :: struct {
-  is_active: bool,
   should_close: bool,
-
   status: NetworkStatus,
 }
 

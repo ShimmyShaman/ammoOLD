@@ -42,8 +42,8 @@ init_twod_render_resources :: proc(using ctx: ^Context, render_pass_config: Rend
   vertices := [?]Vertex{
     {{-1.0, -1.0},},
     {{ 1.0, -1.0},},
-    {{ 1.0, 1.0},},
     {{-1.0, 1.0},},
+    {{ 1.0, 1.0},},
   }
   // Vertex :: struct {
   //   pos: [2]f32,
@@ -57,7 +57,7 @@ init_twod_render_resources :: proc(using ctx: ^Context, render_pass_config: Rend
   // }
   indices := [?]u16{
     0, 1, 2,
-    2, 3, 0,
+    2, 1, 3,
   }
 
   color_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -94,14 +94,15 @@ init_twod_render_resources :: proc(using ctx: ^Context, render_pass_config: Rend
     err = .AllocationFailed
     return
   }
-  defer delete_string(vert_shader_path)
+  fmt.println("vert_shader_path:", vert_shader_path)
+  // defer delete(vert_shader_path)
   frag_shader_path, ae2 :=  strings.concatenate_safe({ctx.violin_package_relative_path, "violin/shaders/colored_rect.frag"},
     context.temp_allocator)
   if ae2 != .None {
     err = .AllocationFailed
     return
   }
-  defer delete_string(frag_shader_path)
+  // defer delete_string(frag_shader_path)
 
   colored_rect_rpci := RenderProgramCreateInfo {
     pipeline_config = PipelineCreateConfig {
@@ -115,16 +116,37 @@ init_twod_render_resources :: proc(using ctx: ^Context, render_pass_config: Rend
   }
   twodr.colored_rect_render_program = create_render_program(ctx, &colored_rect_rpci) or_return
   
+  twodr.colored_rect_uniform_buffer = create_uniform_buffer(ctx, auto_cast (size_of(f32) * 8), .Dynamic) or_return
   twodr.rect_vertex_buffer = create_vertex_buffer(ctx, auto_cast &vertices[0], size_of(Vertex), 4) or_return
   twodr.rect_index_buffer = create_index_buffer(ctx, auto_cast &indices[0], 6) or_return
 
-  twodr.colored_rect_uniform_buffer = create_uniform_buffer(ctx, auto_cast (size_of(f32) * 8), .Dynamic) or_return
+  // parameter_data := [8]f32 {
+  //   auto_cast 100 / cast(f32)ctx.swap_chain.extent.width,
+  //   auto_cast 100 / cast(f32)ctx.swap_chain.extent.height,
+  //   auto_cast 320 / cast(f32)ctx.swap_chain.extent.width,
+  //   auto_cast 200 / cast(f32)ctx.swap_chain.extent.height,
+  //   auto_cast 245 / 255.0,
+  //   auto_cast 252 / 255.0,
+  //   auto_cast 1 / 255.0,
+  //   auto_cast 255 / 255.0,
+  // }
+  // write_to_buffer(ctx, twodr.colored_rect_uniform_buffer, auto_cast &parameter_data[0], auto_cast (size_of(f32) * 8)) or_return
 
   return
 }
 
+// Internal Function :: Use destroy_resource() instead
+__release_twod_render_resource :: proc(using ctx: ^Context, tdr: ^TwoDRenderResource) {
+  destroy_index_buffer(ctx, tdr.rect_index_buffer)
+  destroy_vertex_buffer(ctx, tdr.rect_vertex_buffer)
+  destroy_resource_any(ctx, tdr.colored_rect_uniform_buffer)
+
+  destroy_render_program(ctx, &tdr.colored_rect_render_program)
+  destroy_render_pass(ctx, tdr.render_pass)
+}
+
 begin_render_pass_2d :: proc(using rctx: ^RenderContext, twod_handle: TwoDRenderResourceHandle) -> Error {
-  twodr: ^TwoDRenderResource = auto_cast get_resource_any(&rctx.vctx.resource_manager, auto_cast twod_handle) or_return
+  twodr: ^TwoDRenderResource = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast twod_handle) or_return
 
   // Delegate
   begin_render_pass(rctx, twodr.render_pass) or_return
@@ -134,31 +156,31 @@ begin_render_pass_2d :: proc(using rctx: ^RenderContext, twod_handle: TwoDRender
 
 draw_colored_rect :: proc(using rctx: ^RenderContext, twod_handle: TwoDRenderResourceHandle, rect: ^Rect, color: ^Color) -> Error {
   // Obtain the resources
-  twodr: ^TwoDRenderResource = auto_cast get_resource_any(&rctx.vctx.resource_manager, auto_cast twod_handle) or_return
-  vbuf: ^VertexBuffer = auto_cast get_resource_any(&rctx.vctx.resource_manager, auto_cast twodr.rect_vertex_buffer) or_return
-  ibuf: ^IndexBuffer = auto_cast get_resource_any(&rctx.vctx.resource_manager, auto_cast twodr.rect_index_buffer) or_return
-  ubuf: ^Buffer = auto_cast get_resource_any(&rctx.vctx.resource_manager, auto_cast twodr.colored_rect_uniform_buffer) or_return
+  twodr: ^TwoDRenderResource = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast twod_handle) or_return
+  vbuf: ^VertexBuffer = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast twodr.rect_vertex_buffer) or_return
+  ibuf: ^IndexBuffer = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast twodr.rect_index_buffer) or_return
+  ubuf: ^Buffer = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast twodr.colored_rect_uniform_buffer) or_return
 
   // Reference the render program
   rp := &twodr.colored_rect_render_program
 
   // Write the input to the uniform buffer
   parameter_data := [?]f32 {
-    auto_cast rect.x / cast(f32)rctx.vctx.swap_chain.extent.width,
-    auto_cast rect.y / cast(f32)rctx.vctx.swap_chain.extent.height,
-    auto_cast rect.w / cast(f32)rctx.vctx.swap_chain.extent.width,
-    auto_cast rect.h / cast(f32)rctx.vctx.swap_chain.extent.height,
+    auto_cast rect.x / cast(f32)rctx.ctx.swap_chain.extent.width,
+    auto_cast rect.y / cast(f32)rctx.ctx.swap_chain.extent.height,
+    auto_cast rect.w / cast(f32)rctx.ctx.swap_chain.extent.width,
+    auto_cast rect.h / cast(f32)rctx.ctx.swap_chain.extent.height,
     auto_cast color.r / 255.0,
     auto_cast color.g / 255.0,
     auto_cast color.b / 255.0,
     auto_cast color.a / 255.0,
   }
-  write_to_buffer(rctx.vctx, twodr.colored_rect_uniform_buffer, auto_cast &parameter_data[0], auto_cast (size_of(f32) * 8)) or_return
+  write_to_buffer(ctx, twodr.colored_rect_uniform_buffer, auto_cast &parameter_data[0], auto_cast (size_of(f32) * 8)) or_return
 
   // Setup viewport and clip --- TODO this ain't true
-  _set_viewport_cmd(command_buffer, 0, 0, auto_cast vctx.swap_chain.extent.width,
-    auto_cast vctx.swap_chain.extent.height)
-  _set_scissor_cmd(command_buffer, 0, 0, vctx.swap_chain.extent.width, vctx.swap_chain.extent.height)
+  _set_viewport_cmd(command_buffer, 0, 0, auto_cast ctx.swap_chain.extent.width,
+    auto_cast ctx.swap_chain.extent.height)
+  _set_scissor_cmd(command_buffer, 0, 0, ctx.swap_chain.extent.width, ctx.swap_chain.extent.height)
 
   // Queue Buffer Write
   MAX_DESC_SET_WRITES :: 8
@@ -177,7 +199,7 @@ draw_colored_rect :: proc(using rctx: ^RenderContext, twod_handle: TwoDRenderRes
     descriptorSetCount = 1,
     pSetLayouts = &twodr.colored_rect_render_program.descriptor_layout,
   }
-  vkres := vk.AllocateDescriptorSets(vctx.device, &set_alloc_info, &descriptor_sets[descriptor_set_index])
+  vkres := vk.AllocateDescriptorSets(ctx.device, &set_alloc_info, &descriptor_sets[descriptor_set_index])
   if vkres != .SUCCESS {
     fmt.eprintln("vkAllocateDescriptorSets failed:", vkres)
     return .NotYetDetailed
@@ -203,7 +225,7 @@ draw_colored_rect :: proc(using rctx: ^RenderContext, twod_handle: TwoDRenderRes
   write.dstArrayElement = 0
   write.dstBinding = rp.layout_bindings[0].binding
   
-  vk.UpdateDescriptorSets(vctx.device, auto_cast write_index, &writes[0], 0, nil)
+  vk.UpdateDescriptorSets(ctx.device, auto_cast write_index, &writes[0], 0, nil)
 
   vk.CmdBindDescriptorSets(command_buffer, .GRAPHICS, rp.pipeline.layout, 0, 1, &desc_set, 0, nil)
 
@@ -228,7 +250,7 @@ draw_colored_rect :: proc(using rctx: ^RenderContext, twod_handle: TwoDRenderRes
 
   // vkCmdDrawIndexed(command_buffer, index_draw_count, 1, 0, 0, 0);
   vk.CmdDrawIndexed(command_buffer, auto_cast ibuf.index_count, 1, 0, 0, 0) // TODO -- index_count as u32?
-  // fmt.print(render_data.index_count, ":")
+  // fmt.print("ibuf.index_count:", ibuf.index_count)
 
   return .Success
 }

@@ -122,10 +122,10 @@ begin_render_pass :: proc(using rctx: ^RenderContext, render_pass_handle: Render
 
   // Validate State
   switch rctx.status {
-    case .Initialized:
     case .RenderPass:
       // End the previous Render Pass
       vk.CmdEndRenderPass(rctx.command_buffer)
+    case .Initialized:
     case .Idle, .Initializing:
       fmt.eprintln("Error: Invalid begin_render_pass Render Context State:", rctx.status)
       return .NotYetDetailed
@@ -133,7 +133,7 @@ begin_render_pass :: proc(using rctx: ^RenderContext, render_pass_handle: Render
 
   // render_context.present_framebuffer = swap_chain.present_framebuffers[render_context.swap_chain_index]
   // render_context.framebuffer_3d = swap_chain.framebuffers_3d[render_context.swap_chain_index]
-  rp: ^RenderPass = auto_cast get_resource(&rctx.vctx.resource_manager, auto_cast render_pass_handle) or_return
+  rp: ^RenderPass = auto_cast get_resource(&rctx.ctx.resource_manager, auto_cast render_pass_handle) or_return
   
   // -- Render Pass
   clear_value_count: u32 = 0
@@ -160,7 +160,7 @@ begin_render_pass :: proc(using rctx: ^RenderContext, render_pass_handle: Render
     framebuffer = rp.framebuffers[rctx.swap_chain_index],
     renderArea = vk.Rect2D {
       offset = vk.Offset2D {x = 0, y = 0},
-      extent = vctx.swap_chain.extent,
+      extent = ctx.swap_chain.extent,
     },
     clearValueCount = clear_value_count,
     pClearValues = &clear_values[0],
@@ -183,7 +183,7 @@ end_present :: proc(using rctx: ^RenderContext) -> Error {
     // End Render Pass
     vk.CmdEndRenderPass(rctx.command_buffer)
 
-    rp: ^RenderPass = auto_cast get_resource(&rctx.vctx.resource_manager, auto_cast rctx.active_render_pass) or_return
+    rp: ^RenderPass = auto_cast get_resource(&rctx.ctx.resource_manager, auto_cast rctx.active_render_pass) or_return
     if .IsPresent not_in rp.config {
       fmt.eprintln("Error: Invalid render pass to present to screen (Either include .IsPresent flag in create config,",
         "or render such a pass after this one", rctx.status)
@@ -216,7 +216,7 @@ end_present :: proc(using rctx: ^RenderContext) -> Error {
   submit_info.signalSemaphoreCount = 1;
   submit_info.pSignalSemaphores = &rctx.render_finished
   
-  if res := vk.QueueSubmit(vctx.queues[.Graphics], 1, &submit_info, rctx.in_flight); res != .SUCCESS {
+  if res := vk.QueueSubmit(ctx.queues[.Graphics], 1, &submit_info, rctx.in_flight); res != .SUCCESS {
     fmt.eprintln("Error: Failed to submit draw command buffer")
     return .NotYetDetailed
   }
@@ -226,13 +226,13 @@ end_present :: proc(using rctx: ^RenderContext) -> Error {
   present_info.waitSemaphoreCount = 1;
   present_info.pWaitSemaphores = &rctx.render_finished;
   
-  swap_chains := [?]vk.SwapchainKHR{vctx.swap_chain.handle};
+  swap_chains := [?]vk.SwapchainKHR{ctx.swap_chain.handle};
   present_info.swapchainCount = 1;
   present_info.pSwapchains = &swap_chains[0];
   present_info.pImageIndices = &rctx.swap_chain_index;
   present_info.pResults = nil;
   
-  vk.QueuePresentKHR(vctx.queues[.Present], &present_info);
+  vk.QueuePresentKHR(ctx.queues[.Present], &present_info);
 
   rctx.status = .Idle
 
@@ -272,13 +272,13 @@ _set_scissor_cmd :: proc(command_buffer: vk.CommandBuffer, x: i32, y: i32, width
 draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram, vertex_buffer: VertexBufferResourceHandle,
   index_buffer: IndexBufferResourceHandle, parameters: []ResourceHandle) -> Error {
   // Obtain the resources
-  vbuf: ^VertexBuffer = auto_cast get_resource(&rctx.vctx.resource_manager, cast(ResourceHandle) vertex_buffer) or_return
-  ibuf: ^IndexBuffer = auto_cast get_resource(&rctx.vctx.resource_manager, cast(ResourceHandle) index_buffer) or_return
+  vbuf: ^VertexBuffer = auto_cast get_resource(&rctx.ctx.resource_manager, cast(ResourceHandle) vertex_buffer) or_return
+  ibuf: ^IndexBuffer = auto_cast get_resource(&rctx.ctx.resource_manager, cast(ResourceHandle) index_buffer) or_return
 
   // Setup viewport and clip
-  _set_viewport_cmd(command_buffer, 0, 0, auto_cast vctx.swap_chain.extent.width,
-    auto_cast vctx.swap_chain.extent.height)
-  _set_scissor_cmd(command_buffer, 0, 0, vctx.swap_chain.extent.width, vctx.swap_chain.extent.height)
+  _set_viewport_cmd(command_buffer, 0, 0, auto_cast ctx.swap_chain.extent.width,
+    auto_cast ctx.swap_chain.extent.height)
+  _set_scissor_cmd(command_buffer, 0, 0, ctx.swap_chain.extent.width, ctx.swap_chain.extent.height)
 
   // Queue Buffer Write
   MAX_DESC_SET_WRITES :: 8
@@ -298,7 +298,7 @@ draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram,
     descriptorSetCount = 1,
     pSetLayouts = &render_program.descriptor_layout,
   }
-  vkres := vk.AllocateDescriptorSets(vctx.device, &set_alloc_info, &descriptor_sets[descriptor_set_index])
+  vkres := vk.AllocateDescriptorSets(ctx.device, &set_alloc_info, &descriptor_sets[descriptor_set_index])
   if vkres != .SUCCESS {
     fmt.eprintln("vkAllocateDescriptorSets failed:", vkres)
     return .NotYetDetailed
@@ -315,7 +315,7 @@ draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram,
     #partial switch render_program.layout_bindings[i].descriptorType {
       case .UNIFORM_BUFFER: {
         // TODO -- refactor / performance check / integrate mrt_write_desc_and_queue_render_data concept into this
-        buffer: ^Buffer = auto_cast get_resource(&rctx.vctx.resource_manager, parameters[i]) or_return
+        buffer: ^Buffer = auto_cast get_resource(&rctx.ctx.resource_manager, parameters[i]) or_return
 
         buffer_info := &buffer_infos[i]
         buffer_info.buffer = buffer.buffer
@@ -336,7 +336,7 @@ draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram,
       }
       case .COMBINED_IMAGE_SAMPLER: {
         // Element Fragment Shader Combined Image Sampler
-        image_sampler: ^Texture = auto_cast get_resource(&rctx.vctx.resource_manager, parameters[i]) or_return
+        image_sampler: ^Texture = auto_cast get_resource(&rctx.ctx.resource_manager, parameters[i]) or_return
 
         image_sampler_info := &image_sampler_infos[i]
         image_sampler_info.imageLayout = .SHADER_READ_ONLY_OPTIMAL
@@ -361,7 +361,7 @@ draw_indexed :: proc(using rctx: ^RenderContext, render_program: ^RenderProgram,
     }
   }
   
-  vk.UpdateDescriptorSets(vctx.device, auto_cast write_index, &writes[0], 0, nil)
+  vk.UpdateDescriptorSets(ctx.device, auto_cast write_index, &writes[0], 0, nil)
 
   vk.CmdBindDescriptorSets(command_buffer, .GRAPHICS, render_program.pipeline.layout, 0, 1, &desc_set, 0, nil)
 

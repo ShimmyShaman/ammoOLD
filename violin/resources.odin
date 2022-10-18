@@ -171,10 +171,19 @@ _create_resource :: proc(using rm: ^ResourceManager, resource_kind: ResourceKind
   }
 }
 
+_resource_manager_report :: proc(using rm: ^ResourceManager) {
+  fmt.println("Resource Manager Report:")
+  fmt.println("  Resource Manager:", rm)
+  fmt.println("  Resource Count: ", len(resource_map))
+  fmt.println("  Resource Index: ", resource_index)
+}
+
 get_resource_any :: proc(using rm: ^ResourceManager, rh: ResourceHandle) -> (ptr: rawptr, err: Error) {
   res := resource_map[rh]
   if res == nil {
     err = .ResourceNotFound
+    fmt.eprintln("Could not find resource for handle:", rh)
+    _resource_manager_report(rm)
     return
   }
 
@@ -190,12 +199,13 @@ get_resource_render_pass :: proc(using rm: ^ResourceManager, rh: RenderPassResou
 get_resource :: proc {get_resource_any, get_resource_render_pass}
 
 destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
+  vk.DeviceWaitIdle(ctx.device)
+  
   res := resource_manager.resource_map[rh]
   if res == nil {
     fmt.println("Resource not found:", rh)
     return .ResourceNotFound
   }
-  // fmt.println("Destroying resource:", rh, "of type:", res.kind)
 
   switch res.kind {
     case .Texture:
@@ -229,10 +239,9 @@ destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
       vk.DestroyImage(device, db.image, nil)
       vk.FreeMemory(device, db.memory, nil)
     case .TwoDRenderResource:
-      ui: ^TwoDRenderResource = auto_cast &res.data
-      
-      destroy_resource(ctx, ui.render_pass)
-      destroy_render_program(ctx, &ui.colored_rect_render_program)
+      tdr: ^TwoDRenderResource = auto_cast &res.data
+
+      __release_twod_render_resource(ctx, tdr)
     case .VertexBuffer, .IndexBuffer:
       vb: ^VertexBuffer = auto_cast &res.data
       
@@ -243,6 +252,7 @@ destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
   }
 
   delete_key(&resource_manager.resource_map, rh)
+  fmt.println("Destroyed resource:", rh, "of type:", res.kind)
   // if render_data.texture.image != 0 {
   //   vk.DestroyImage(ctx.device, render_data.texture.image, nil)
   //   vk.FreeMemory(ctx.device, render_data.texture.image_memory, nil)
@@ -256,12 +266,20 @@ destroy_render_pass :: proc(using ctx: ^Context, rh: RenderPassResourceHandle) -
   return destroy_resource_any(ctx, auto_cast rh)
 }
 
+destroy_vertex_buffer :: proc(using ctx: ^Context, rh: VertexBufferResourceHandle) -> Error {
+  return destroy_resource_any(ctx, auto_cast rh)
+}
+
+destroy_index_buffer :: proc(using ctx: ^Context, rh: IndexBufferResourceHandle) -> Error {
+  return destroy_resource_any(ctx, auto_cast rh)
+}
+
 destroy_ui_render_resource :: proc(using ctx: ^Context, rh: TwoDRenderResourceHandle) -> Error {
   return destroy_resource_any(ctx, auto_cast rh)
 }
 
-destroy_resource :: proc {destroy_resource_any, destroy_render_pass, destroy_ui_render_resource}
-
+destroy_resource :: proc {destroy_resource_any, destroy_render_pass, destroy_vertex_buffer, destroy_index_buffer,
+  destroy_ui_render_resource}
 
 _resize_framebuffer_resources :: proc(using ctx: ^Context) -> Error {
 
@@ -834,7 +852,7 @@ write_to_buffer :: proc(using ctx: ^Context, rh: ResourceHandle, data: rawptr, s
     _end_single_time_commands(ctx) or_return
   }
 
-  return .NotYetDetailed
+  return .Success
 }
 
 create_vertex_buffer :: proc(using ctx: ^Context, vertex_data: rawptr, vertex_size_in_bytes: int,
@@ -902,7 +920,7 @@ create_vertex_buffer :: proc(using ctx: ^Context, vertex_data: rawptr, vertex_si
 
 create_index_buffer :: proc(using ctx: ^Context, indices: ^u16, index_count: int) -> (rh:IndexBufferResourceHandle, err: Error) {
   // Create the resource
-  rh = auto_cast _create_resource(&ctx.resource_manager, .VertexBuffer) or_return
+  rh = auto_cast _create_resource(&ctx.resource_manager, .IndexBuffer) or_return
   index_buffer: ^IndexBuffer = auto_cast get_resource_any(&ctx.resource_manager, auto_cast rh) or_return
 
   // Set
