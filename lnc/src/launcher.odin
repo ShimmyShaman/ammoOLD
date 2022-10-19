@@ -31,6 +31,7 @@ main :: proc() {
   thread := thread.create_and_start_with_data(&launcher_data.net, begin_client_network_connection)
 
   _begin_game_loop(ctx, &launcher_data)
+  // time.sleep(time.Second * 10)
 
   retries := 4000
   launcher_data.net.should_close = true
@@ -192,11 +193,14 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     if vi.begin_render_pass_2d(rctx, handle_2d) != .Success do return .NotYetDetailed
 
     sq := mu.Rect{100, 100, 300, 200}
-    co := mu.Color{220, 0, 15, 255}
+    co := mu.Color{220, 40, 185, 255}
+    vi.draw_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co)
+    sq = mu.Rect{200, 200, 100, 300}
+    co = mu.Color{255, 255, 15, 255}
     vi.draw_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co)
     // cmd : ^mu.Command
     // for mu.next_command(&muc, &cmd) {
-    //   fmt.println("next_command:", cmd)
+    //   // fmt.println("next_command:", cmd)
     //   #partial switch v in cmd.variant {
     //     case ^mu.Command_Text:
     //       cmd_t : ^mu.Command_Text = auto_cast &cmd.variant
@@ -204,6 +208,7 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     //     case ^mu.Command_Rect:
     //       cmd_r : ^mu.Command_Rect = auto_cast &cmd.variant
     //       fmt.println("rect:", cmd_r)
+    //       vi.draw_colored_rect(rctx, handle_2d, auto_cast &cmd_r.rect, auto_cast &cmd_r.color)
     //     case:
     //       fmt.println("unknown command:", cmd.variant)
     //     // case ^mu.Command_Jump:

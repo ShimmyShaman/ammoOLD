@@ -5,6 +5,7 @@ import "core:time"
 import "core:strings"
 import "core:mem"
 import "core:os"
+import "core:sync"
 
 import enet "vendor:ENet"
 
@@ -51,42 +52,37 @@ begin_client_network_connection :: proc(arg: rawptr) {
   }
   defer enet.host_destroy(cli.host)
 
-  server_address := enet.Address {
+  cli.netdata.server_address = enet.Address {
     port = 1234,
   }
-  enet.address_set_host_ip(&server_address, "127.0.0.1")
+  enet.address_set_host_ip(&cli.netdata.server_address, "127.0.0.1")
 
   if cli.netdata.should_close {
     cli.netdata.status = .Shutdown
     return
   }
-
-  // Attempt to connect to the server
-  cli.netdata.status = .Connecting
-  fmt.println("[C]", cli.netdata.status, "...")
-  cli.server = enet.host_connect(cli.host, &server_address, 2, 0)
-  if cli.server == nil {
-    fmt.println("[C] peer host_connect failed!")
-    cli.netdata.status = .Shutdown
-    return
-  }
+  cli.netdata.status = .Initialized
 
   // Begin receive loop
   // Loop
   _process_events(&cli)
 
   // Disconnect & confirm
-  _force_disconnect(&cli)
+  if cli.netdata.status == .Connected {
+    _force_disconnect(&cli)
+  }
   cli.netdata.status = .Shutdown
 }
 
 _process_events :: proc(cli: ^HostInfo) -> Error {
+  fmt.println("process_events:", cli.netdata.status)
+
   event: enet.Event
-  retries := 0
+  res: i32
   activity_time := time.now()
   for {
     if cli.netdata.should_close {
-      fmt.println("[C] Client Network Thread forced to close")
+      // fmt.println("[C] Client Network Thread closing by request")
       return .Success
     }
     // MaxUpTimeSecs :: 3
@@ -95,22 +91,16 @@ _process_events :: proc(cli: ^HostInfo) -> Error {
     //   break
     // }
 
-    res := enet.host_service(cli.host, &event, 1000)
-    if res < 0 {
-      fmt.println("[C] host_service error:", res)
-      break
+    #partial switch cli.netdata.status {
+      case .Initialized, .Disconnected:
+        _reconnect_to_server(cli)
+        continue
     }
 
-    if res == 0 {
-      #partial switch cli.netdata.status {
-        case .Connecting:
-          if retries >= 5 {
-            fmt.println("[C] Connection to Server Failed")
-            break
-          }
-          retries += 1
-      }
-      continue
+    res = enet.host_service(cli.host, &event, 1000)
+    if res < 0 {
+      fmt.eprintln("[C] Error host_service:", res)
+      break
     }
 
     // Received something
@@ -125,6 +115,10 @@ _process_events :: proc(cli: ^HostInfo) -> Error {
         _handle_connect_event(cli, &event) or_return
       case .DISCONNECT:
         _handle_disconnect_event(cli, &event) or_return
+
+        // Reset connection data
+        cli.netdata.connection_sequence_retries = 0
+        cli.netdata.connection_sequence_retry_time = time.now()
       case .RECEIVE:
         _handle_receive_event(cli, &event) or_return
       case .NONE:
@@ -136,8 +130,71 @@ _process_events :: proc(cli: ^HostInfo) -> Error {
   return .Success
 }
 
+_reconnect_to_server :: proc(cli: ^HostInfo) {
+  event: enet.Event
+  res: i32
+
+  time_diff := time.diff(time.now(), cli.netdata.connection_sequence_retry_time)
+  if time_diff >= 0 {
+    time.sleep(time_diff)
+  }
+  cli.netdata.connection_sequence_retries += 1
+
+  // Attempt to connect to the server
+  cli.netdata.status = .Connecting
+  fmt.println("[C] Attempting to connect to server...")
+  cli.server = enet.host_connect(cli.host, &cli.netdata.server_address, 2, 0)
+  if cli.server == nil {
+    fmt.println("[C] peer host_connect failed!")
+    cli.netdata.status = .Disconnected
+    return
+  }
+
+  // Wait for connection
+  for i in 0..<10 {
+    if cli.netdata.should_close do return
+
+    res = enet.host_service(cli.host, &event, 500)
+    if res == 0 do continue
+
+    if res > 0 && event.type == .CONNECT {
+      fmt.println("[C] Connected to server!")
+      cli.netdata.status = .Connected
+      return
+    }
+
+    if res < 0 {
+      fmt.eprintln("[C] Error host_service:", res)
+      cli.netdata.status = .Disconnected
+      break
+    }
+
+    break
+  }
+
+  // Reset
+  res = 0
+  for i in 0..<cli.netdata.connection_sequence_retries do res += auto_cast (i / 2)
+  res = min(90, 1 + res)
+  fmt.print("[C] Connection failed!")
+  if res > 4 {
+    fmt.println(" Retrying in", res, "seconds...")
+  } else {
+    fmt.println("")
+  }
+
+  cli.netdata.connection_sequence_retry_time = time.time_add(time.now(), time.Second * auto_cast res)
+  cli.netdata.status = .Disconnected
+
+  enet.peer_reset(cli.server)
+  cli.server = nil
+  
+  return
+}
+
 _force_disconnect :: proc(cli: ^HostInfo) {
   // Disconnect
+  cli.netdata.status = .Disconnecting
   enet.peer_disconnect(cli.server, 0)
 
   event: enet.Event
@@ -148,6 +205,7 @@ _force_disconnect :: proc(cli: ^HostInfo) {
       case .DISCONNECT:
         time.sleep(time.Second * 1)
         fmt.println("[C] client disconnected!")
+        cli.netdata.status = .Disconnected
         break disconnect_loop
     }
     

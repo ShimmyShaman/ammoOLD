@@ -40,10 +40,10 @@ init_twod_render_resources :: proc(using ctx: ^Context, render_pass_config: Rend
   }
   
   vertices := [?]Vertex{
-    {{-1.0, -1.0},},
-    {{ 1.0, -1.0},},
-    {{-1.0, 1.0},},
-    {{ 1.0, 1.0},},
+    {{0.0, 0.0},},
+    {{1.0, 0.0},},
+    {{0.0, 1.0},},
+    {{1.0, 1.0},},
   }
   // Vertex :: struct {
   //   pos: [2]f32,
@@ -175,6 +175,7 @@ draw_colored_rect :: proc(using rctx: ^RenderContext, twod_handle: TwoDRenderRes
     auto_cast color.b / 255.0,
     auto_cast color.a / 255.0,
   }
+  // fmt.println("parameter_data:", parameter_data)
   write_to_buffer(ctx, twodr.colored_rect_uniform_buffer, auto_cast &parameter_data[0], auto_cast (size_of(f32) * 8)) or_return
 
   // Setup viewport and clip --- TODO this ain't true

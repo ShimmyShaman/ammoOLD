@@ -143,7 +143,7 @@ begin_render_pass :: proc(using rctx: ^RenderContext, render_pass_handle: Render
   clear_values := [2]vk.ClearValue {
     vk.ClearValue {
       color = vk.ClearColorValue {
-        float32 = [4]f32 {0.0, 0.0, 0.0, 1.0},
+        float32 = [4]f32 {0.1, 0.1, 0.1, 1.0},
       },
     },
     vk.ClearValue {
