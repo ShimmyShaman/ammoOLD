@@ -31,21 +31,21 @@ ResourceHandle :: distinct int
 VertexBufferResourceHandle :: distinct ResourceHandle
 IndexBufferResourceHandle :: distinct ResourceHandle
 RenderPassResourceHandle :: distinct ResourceHandle
-TwoDRenderResourceHandle :: distinct ResourceHandle
+StampRenderResourceHandle :: distinct ResourceHandle
 
 ResourceKind :: enum {
   Buffer = 1,
   Texture,
   DepthBuffer,
   RenderPass,
-  TwoDRenderResource,
+  StampRenderResource,
   VertexBuffer,
   IndexBuffer,
 }
 
 Resource :: struct {
   kind: ResourceKind,
-  data: union { Buffer, Texture, DepthBuffer, RenderPass, TwoDRenderResource, VertexBuffer, IndexBuffer },
+  data: union { Buffer, Texture, DepthBuffer, RenderPass, StampRenderResource, VertexBuffer, IndexBuffer },
 }
 
 ImageSamplerUsage :: enum {
@@ -101,12 +101,20 @@ RenderPass :: struct {
   depth_buffer_rh: ResourceHandle,
 }
 
-TwoDRenderResource :: struct {
+StampRenderResource :: struct {
   render_pass: RenderPassResourceHandle,
   colored_rect_render_program: RenderProgram,
   rect_vertex_buffer: VertexBufferResourceHandle,
   rect_index_buffer: IndexBufferResourceHandle,
-  colored_rect_uniform_buffer: ResourceHandle,
+
+  uniform_buffer: StampUniformBuffer,
+}
+
+StampUniformBuffer :: struct {
+  rh: ResourceHandle,
+  utilization: vk.DeviceSize,
+  capacity: vk.DeviceSize,
+  device_min_block_alignment: vk.DeviceSize,
 }
 
 // TODO -- this is a bit of a hack, but it works for now
@@ -156,7 +164,7 @@ _create_resource :: proc(using rm: ^ResourceManager, resource_kind: ResourceKind
   defer sync.unlock(&rm._mutex)
 
   switch resource_kind {
-    case .Texture, .Buffer, .DepthBuffer, .RenderPass, .TwoDRenderResource, .VertexBuffer, .IndexBuffer:
+    case .Texture, .Buffer, .DepthBuffer, .RenderPass, .StampRenderResource, .VertexBuffer, .IndexBuffer:
       rh = resource_index
       resource_index += 1
       res : ^Resource = auto_cast mem.alloc(size_of(Resource))
@@ -238,10 +246,10 @@ destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
       vk.DestroyImageView(device, db.view, nil)
       vk.DestroyImage(device, db.image, nil)
       vk.FreeMemory(device, db.memory, nil)
-    case .TwoDRenderResource:
-      tdr: ^TwoDRenderResource = auto_cast &res.data
+    case .StampRenderResource:
+      tdr: ^StampRenderResource = auto_cast &res.data
 
-      __release_twod_render_resource(ctx, tdr)
+      __release_stamp_render_resource(ctx, tdr)
     case .VertexBuffer, .IndexBuffer:
       vb: ^VertexBuffer = auto_cast &res.data
       
@@ -274,7 +282,7 @@ destroy_index_buffer :: proc(using ctx: ^Context, rh: IndexBufferResourceHandle)
   return destroy_resource_any(ctx, auto_cast rh)
 }
 
-destroy_ui_render_resource :: proc(using ctx: ^Context, rh: TwoDRenderResourceHandle) -> Error {
+destroy_ui_render_resource :: proc(using ctx: ^Context, rh: StampRenderResourceHandle) -> Error {
   return destroy_resource_any(ctx, auto_cast rh)
 }
 
@@ -772,14 +780,14 @@ load_texture_from_file :: proc(ctx: ^Context, filepath: cstring) -> (rh: Resourc
   return
 }
 
-create_uniform_buffer :: proc(using ctx: ^Context, size_in_bytes: u64, intended_usage: BufferUsage) -> (rh: ResourceHandle,
+create_uniform_buffer :: proc(using ctx: ^Context, size_in_bytes: vk.DeviceSize, intended_usage: BufferUsage) -> (rh: ResourceHandle,
   err: Error) {
   #partial switch intended_usage {
     case .Dynamic:
       // Create the Buffer
       buffer_create_info := vk.BufferCreateInfo {
         sType = .BUFFER_CREATE_INFO,
-        size = auto_cast size_in_bytes,
+        size = size_in_bytes,
         usage = {.UNIFORM_BUFFER, .TRANSFER_DST},
       }
 
@@ -790,18 +798,19 @@ create_uniform_buffer :: proc(using ctx: ^Context, size_in_bytes: u64, intended_
       
       rh = _create_resource(&ctx.resource_manager, .Buffer) or_return
       buffer: ^Buffer = auto_cast get_resource(&ctx.resource_manager, rh) or_return
-      buffer.size = auto_cast size_in_bytes
+      buffer.size = size_in_bytes
       vkres := vma.CreateBuffer(vma_allocator, &buffer_create_info, &allocation_create_info, &buffer.buffer,
         &buffer.allocation, &buffer.allocation_info)
       if vkres != .SUCCESS {
         fmt.eprintln("create_uniform_buffer>vmaCreateBuffer failed:", vkres)
         err = .NotYetDetailed
-        return
       }
     case:
       fmt.println("create_uniform_buffer() > Unsupported buffer usage:", intended_usage)
+      err = .NotYetDetailed
   }
-return
+
+  return
 }
 
 // TODO -- allow/disable staging - test performance

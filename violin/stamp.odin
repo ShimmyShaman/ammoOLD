@@ -26,13 +26,13 @@ Color :: struct {
   a: u8,
 }
 
-init_twod_render_resources :: proc(using ctx: ^Context, render_pass_config: RenderPassConfigFlags) -> (twodh: TwoDRenderResourceHandle, err: Error) {
+init_stamp_batch_renderer :: proc(using ctx: ^Context, render_pass_config: RenderPassConfigFlags) -> (stamph: StampRenderResourceHandle, err: Error) {
   // Create the resource
-  twodh = auto_cast _create_resource(&resource_manager, .TwoDRenderResource) or_return
-  twodr : ^TwoDRenderResource = auto_cast get_resource_any(&resource_manager, auto_cast twodh) or_return
+  stamph = auto_cast _create_resource(&resource_manager, .StampRenderResource) or_return
+  stampr : ^StampRenderResource = auto_cast get_resource_any(&resource_manager, auto_cast stamph) or_return
 
   // Create the render pass
-  twodr.render_pass = create_render_pass(ctx, render_pass_config) or_return
+  stampr.render_pass = create_render_pass(ctx, render_pass_config) or_return
   
   // Create the render programs
   Vertex :: struct {
@@ -108,17 +108,36 @@ init_twod_render_resources :: proc(using ctx: ^Context, render_pass_config: Rend
     pipeline_config = PipelineCreateConfig {
       vertex_shader_filepath = vert_shader_path, // TODO
       fragment_shader_filepath = frag_shader_path,
-      render_pass = twodr.render_pass,
+      render_pass = stampr.render_pass,
     },
     vertex_size = size_of(Vertex),
     buffer_bindings = color_bindings[:],
     input_attributes = inputs[:],
   }
-  twodr.colored_rect_render_program = create_render_program(ctx, &colored_rect_rpci) or_return
+  stampr.colored_rect_render_program = create_render_program(ctx, &colored_rect_rpci) or_return
   
-  twodr.colored_rect_uniform_buffer = create_uniform_buffer(ctx, auto_cast (size_of(f32) * 8), .Dynamic) or_return
-  twodr.rect_vertex_buffer = create_vertex_buffer(ctx, auto_cast &vertices[0], size_of(Vertex), 4) or_return
-  twodr.rect_index_buffer = create_index_buffer(ctx, auto_cast &indices[0], 6) or_return
+  stampr.uniform_buffer.capacity = auto_cast (size_of(f32) * 8 * 100) // TODO -- appropriate size
+  stampr.uniform_buffer.rh = create_uniform_buffer(ctx, stampr.uniform_buffer.capacity, .Dynamic) or_return
+
+  // Ensure the created uniform buffer is HOST_VISIBLE for dynamic copying
+  {
+    ubr: ^Buffer = auto_cast get_resource_any(&resource_manager, auto_cast stampr.uniform_buffer.rh) or_return
+    mem_property_flags: vk.MemoryPropertyFlags
+    vma.GetAllocationMemoryProperties(vma_allocator, ubr.allocation, &mem_property_flags)
+    if vk.MemoryPropertyFlag.HOST_VISIBLE not_in mem_property_flags {
+      fmt.eprintln("init_stamp_batch_renderer>buffer memory is not HOST_VISIBLE. Invalid Call")
+      err = .NotYetDetailed
+      return
+    }
+
+    props: vk.PhysicalDeviceProperties;
+    vk.GetPhysicalDeviceProperties(physical_device, &props);
+    stampr.uniform_buffer.device_min_block_alignment = props.limits.minUniformBufferOffsetAlignment
+  }
+
+  // TODO use triangle-fan? test performance difference
+  stampr.rect_vertex_buffer = create_vertex_buffer(ctx, auto_cast &vertices[0], size_of(Vertex), 4) or_return
+  stampr.rect_index_buffer = create_index_buffer(ctx, auto_cast &indices[0], 6) or_return
 
   // parameter_data := [8]f32 {
   //   auto_cast 100 / cast(f32)ctx.swap_chain.extent.width,
@@ -130,42 +149,56 @@ init_twod_render_resources :: proc(using ctx: ^Context, render_pass_config: Rend
   //   auto_cast 1 / 255.0,
   //   auto_cast 255 / 255.0,
   // }
-  // write_to_buffer(ctx, twodr.colored_rect_uniform_buffer, auto_cast &parameter_data[0], auto_cast (size_of(f32) * 8)) or_return
+  // write_to_buffer(ctx, stampr.uniform_buffer, auto_cast &parameter_data[0], auto_cast (size_of(f32) * 8)) or_return
 
   return
 }
 
 // Internal Function :: Use destroy_resource() instead
-__release_twod_render_resource :: proc(using ctx: ^Context, tdr: ^TwoDRenderResource) {
+__release_stamp_render_resource :: proc(using ctx: ^Context, tdr: ^StampRenderResource) {
   destroy_index_buffer(ctx, tdr.rect_index_buffer)
   destroy_vertex_buffer(ctx, tdr.rect_vertex_buffer)
-  destroy_resource_any(ctx, tdr.colored_rect_uniform_buffer)
+  destroy_resource_any(ctx, tdr.uniform_buffer.rh)
 
   destroy_render_program(ctx, &tdr.colored_rect_render_program)
   destroy_render_pass(ctx, tdr.render_pass)
 }
 
-begin_render_pass_2d :: proc(using rctx: ^RenderContext, twod_handle: TwoDRenderResourceHandle) -> Error {
-  twodr: ^TwoDRenderResource = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast twod_handle) or_return
+stamp_begin :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResourceHandle) -> Error {
+  stampr: ^StampRenderResource = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stamp_handle) or_return
 
   // Delegate
-  begin_render_pass(rctx, twodr.render_pass) or_return
+  begin_render_pass(rctx, stampr.render_pass) or_return
+
+  // Reset Uniform Buffer Tracking
+  stampr.uniform_buffer.utilization = 0
 
   return .Success
 }
 
-draw_colored_rect :: proc(using rctx: ^RenderContext, twod_handle: TwoDRenderResourceHandle, rect: ^Rect, color: ^Color) -> Error {
-  // Obtain the resources
-  twodr: ^TwoDRenderResource = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast twod_handle) or_return
-  vbuf: ^VertexBuffer = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast twodr.rect_vertex_buffer) or_return
-  ibuf: ^IndexBuffer = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast twodr.rect_index_buffer) or_return
-  ubuf: ^Buffer = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast twodr.colored_rect_uniform_buffer) or_return
+// stamp_end :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResourceHandle) -> Error {
+//   stampr: ^StampRenderResource = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stamp_handle) or_return
 
-  // Reference the render program
-  rp := &twodr.colored_rect_render_program
+//   if stampr.uniform_buffer_use_count > 0 {
+//     __stampr_draw_indexed(rctx, stampr) or_return
+//   }
+
+//   // End Render Pass
+//   vk.CmdEndRenderPass(rctx.command_buffer)
+//   rctx.status = .EndedRenderPass
+
+//   return .Success
+// }
+
+stamp_colored_rect :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResourceHandle, rect: ^Rect, color: ^Color) -> Error {
+  // Obtain the resources
+  stampr: ^StampRenderResource = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stamp_handle) or_return
+  vbuf: ^VertexBuffer = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stampr.rect_vertex_buffer) or_return
+  ibuf: ^IndexBuffer = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stampr.rect_index_buffer) or_return
+  ubuf: ^Buffer = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stampr.uniform_buffer.rh) or_return
 
   // Write the input to the uniform buffer
-  parameter_data := [?]f32 {
+  parameter_data := [8]f32 {
     auto_cast rect.x / cast(f32)rctx.ctx.swap_chain.extent.width,
     auto_cast rect.y / cast(f32)rctx.ctx.swap_chain.extent.height,
     auto_cast rect.w / cast(f32)rctx.ctx.swap_chain.extent.width,
@@ -175,8 +208,25 @@ draw_colored_rect :: proc(using rctx: ^RenderContext, twod_handle: TwoDRenderRes
     auto_cast color.b / 255.0,
     auto_cast color.a / 255.0,
   }
-  // fmt.println("parameter_data:", parameter_data)
-  write_to_buffer(ctx, twodr.colored_rect_uniform_buffer, auto_cast &parameter_data[0], auto_cast (size_of(f32) * 8)) or_return
+
+  // Write to the HOST_VISIBLE memory
+  ubo_offset: vk.DeviceSize = auto_cast stampr.uniform_buffer.utilization
+  ubo_range: int : size_of(f32) * 8
+
+  if ubo_offset + auto_cast ubo_range > stampr.uniform_buffer.capacity {
+    fmt.eprintln("stamp_colored_rect>uniform buffer offset + range exceeds buffer size. TODO -- reset render pass")
+    return .NotYetDetailed
+
+    // // Reset
+    // ubo_offset = 0
+  }
+  
+  // Update the uniform buffer utilization
+  stampr.uniform_buffer.utilization += max(cast(vk.DeviceSize) ubo_range, stampr.uniform_buffer.device_min_block_alignment)
+  
+  // Write to the buffer
+  copy_dst: rawptr = auto_cast (cast(uintptr)ubuf.allocation_info.pMappedData + auto_cast ubo_offset)
+  mem.copy(copy_dst, auto_cast &parameter_data[0], ubo_range)
 
   // Setup viewport and clip --- TODO this ain't true
   _set_viewport_cmd(command_buffer, 0, 0, auto_cast ctx.swap_chain.extent.width,
@@ -198,21 +248,20 @@ draw_colored_rect :: proc(using rctx: ^RenderContext, twod_handle: TwoDRenderRes
     // Use the descriptor pool we created earlier (the one dedicated to this frame)
     descriptorPool = descriptor_pool,
     descriptorSetCount = 1,
-    pSetLayouts = &twodr.colored_rect_render_program.descriptor_layout,
+    pSetLayouts = &stampr.colored_rect_render_program.descriptor_layout,
   }
   vkres := vk.AllocateDescriptorSets(ctx.device, &set_alloc_info, &descriptor_sets[descriptor_set_index])
   if vkres != .SUCCESS {
     fmt.eprintln("vkAllocateDescriptorSets failed:", vkres)
     return .NotYetDetailed
   }
-
   desc_set := descriptor_sets[descriptor_set_index]
   descriptor_sets_index += set_alloc_info.descriptorSetCount
 
   // Describe the uniform buffer binding
   buffer_infos[0].buffer = ubuf.buffer
-  buffer_infos[0].offset = 0
-  buffer_infos[0].range = ubuf.size
+  buffer_infos[0].offset = ubo_offset
+  buffer_infos[0].range = auto_cast ubo_range
 
   // Element Vertex Shader Uniform Buffer
   write := &writes[write_index]
@@ -224,13 +273,13 @@ draw_colored_rect :: proc(using rctx: ^RenderContext, twod_handle: TwoDRenderRes
   write.descriptorType = .UNIFORM_BUFFER
   write.pBufferInfo = &buffer_infos[0]
   write.dstArrayElement = 0
-  write.dstBinding = rp.layout_bindings[0].binding
+  write.dstBinding = stampr.colored_rect_render_program.layout_bindings[0].binding
   
   vk.UpdateDescriptorSets(ctx.device, auto_cast write_index, &writes[0], 0, nil)
 
-  vk.CmdBindDescriptorSets(command_buffer, .GRAPHICS, rp.pipeline.layout, 0, 1, &desc_set, 0, nil)
+  vk.CmdBindDescriptorSets(command_buffer, .GRAPHICS, stampr.colored_rect_render_program.pipeline.layout, 0, 1, &desc_set, 0, nil)
 
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, rp.pipeline.handle)
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, stampr.colored_rect_render_program.pipeline.handle)
 
   vk.CmdBindIndexBuffer(command_buffer, ibuf.buffer, 0, ibuf.index_type) // TODO -- support other index types
 

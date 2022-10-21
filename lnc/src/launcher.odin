@@ -28,6 +28,7 @@ main :: proc() {
   launcher_data: LauncherData
 
   // Begin Network Connection
+  // TODO begin_async
   thread := thread.create_and_start_with_data(&launcher_data.net, begin_client_network_connection)
 
   _begin_game_loop(ctx, &launcher_data)
@@ -68,8 +69,8 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
   // }
   // defer vi.destroy_resource(ctx, rpass2d)
 
-  handle_2d: vi.TwoDRenderResourceHandle
-  handle_2d, err = vi.init_twod_render_resources(ctx, { .IsPresent }) // .HasPreviousColorPass,
+  handle_2d: vi.StampRenderResourceHandle
+  handle_2d, err = vi.init_stamp_batch_renderer(ctx, { .IsPresent }) // .HasPreviousColorPass,
   if err != .Success {
     fmt.println("create_render_pass 2D error")
     return .NotYetDetailed
@@ -190,14 +191,14 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
 
     // if vi.draw_indexed(rctx, &rp2, &rd2) != .Success do break loop
 
-    if vi.begin_render_pass_2d(rctx, handle_2d) != .Success do return .NotYetDetailed
+    if vi.stamp_begin(rctx, handle_2d) != .Success do return .NotYetDetailed
 
     sq := mu.Rect{100, 100, 300, 200}
     co := mu.Color{220, 40, 185, 255}
-    vi.draw_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co)
+    vi.stamp_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co)
     sq = mu.Rect{200, 200, 100, 300}
     co = mu.Color{255, 255, 15, 255}
-    vi.draw_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co)
+    vi.stamp_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co)
     // cmd : ^mu.Command
     // for mu.next_command(&muc, &cmd) {
     //   // fmt.println("next_command:", cmd)
@@ -208,7 +209,7 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     //     case ^mu.Command_Rect:
     //       cmd_r : ^mu.Command_Rect = auto_cast &cmd.variant
     //       fmt.println("rect:", cmd_r)
-    //       vi.draw_colored_rect(rctx, handle_2d, auto_cast &cmd_r.rect, auto_cast &cmd_r.color)
+    //       vi.stamp_colored_rect(rctx, handle_2d, auto_cast &cmd_r.rect, auto_cast &cmd_r.color)
     //     case:
     //       fmt.println("unknown command:", cmd.variant)
     //     // case ^mu.Command_Jump:
@@ -219,6 +220,8 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     //     //   fmt.println("clip:")
     //   }
     // }
+
+    // if vi.stamp_end(rctx, handle_2d) != .Success do return .NotYetDetailed
 
     if vi.end_present(rctx) != .Success {
       fmt.println("end_present error")

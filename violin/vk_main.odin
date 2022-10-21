@@ -102,6 +102,7 @@ FrameRenderStateKind :: enum {
   Initializing,
   Initialized,
   RenderPass,
+  EndedRenderPass,
 }
 
 Pipeline :: struct {

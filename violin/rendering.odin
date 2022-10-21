@@ -125,7 +125,10 @@ begin_render_pass :: proc(using rctx: ^RenderContext, render_pass_handle: Render
     case .RenderPass:
       // End the previous Render Pass
       vk.CmdEndRenderPass(rctx.command_buffer)
+    case .EndedRenderPass:
+      // Empty
     case .Initialized:
+      // Empty
     case .Idle, .Initializing:
       fmt.eprintln("Error: Invalid begin_render_pass Render Context State:", rctx.status)
       return .NotYetDetailed
@@ -179,19 +182,22 @@ end_present :: proc(using rctx: ^RenderContext) -> Error {
   defer sync.unlock(&rctx.mutex)
 
   // Validate State
-  if rctx.status == .RenderPass {
-    // End Render Pass
-    vk.CmdEndRenderPass(rctx.command_buffer)
-
-    rp: ^RenderPass = auto_cast get_resource(&rctx.ctx.resource_manager, auto_cast rctx.active_render_pass) or_return
-    if .IsPresent not_in rp.config {
-      fmt.eprintln("Error: Invalid render pass to present to screen (Either include .IsPresent flag in create config,",
-        "or render such a pass after this one", rctx.status)
+  switch rctx.status {
+    case .RenderPass:
+      // End the previous Render Pass
+      vk.CmdEndRenderPass(rctx.command_buffer)
+      fallthrough
+    case .EndedRenderPass:
+      // Empty
+      rp: ^RenderPass = auto_cast get_resource(&rctx.ctx.resource_manager, auto_cast rctx.active_render_pass) or_return
+      if .IsPresent not_in rp.config {
+        fmt.eprintln("Error: Invalid render pass to present to screen (Either include .IsPresent flag in create config,",
+          "or render such a pass after this one", rctx.status)
+        return .NotYetDetailed
+      }
+    case .Initialized, .Idle, .Initializing:
+      fmt.eprintln("Error: Invalid end_present Render Context State:", rctx.status)
       return .NotYetDetailed
-    }
-  } else {
-    fmt.eprintln("Error: Render state not in RenderPass")
-    // return .NotYetDetailed
   }
 
   vkres := vk.EndCommandBuffer(rctx.command_buffer)
