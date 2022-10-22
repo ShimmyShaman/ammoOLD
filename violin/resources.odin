@@ -102,7 +102,7 @@ RenderPass :: struct {
 }
 
 StampRenderResource :: struct {
-  render_pass: RenderPassResourceHandle,
+  clear_render_pass, draw_render_pass, present_render_pass: RenderPassResourceHandle,
   colored_rect_render_program: RenderProgram,
   rect_vertex_buffer: VertexBufferResourceHandle,
   rect_index_buffer: IndexBufferResourceHandle,
@@ -170,7 +170,7 @@ _create_resource :: proc(using rm: ^ResourceManager, resource_kind: ResourceKind
       res : ^Resource = auto_cast mem.alloc(size_of(Resource))
       resource_map[rh] = res
       res.kind = resource_kind
-      fmt.println("Created resource: ", rh)
+      // fmt.println("Created resource: ", rh)
       return
     case:
       fmt.println("Resource type not supported:", resource_kind)
@@ -260,7 +260,7 @@ destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
   }
 
   delete_key(&resource_manager.resource_map, rh)
-  fmt.println("Destroyed resource:", rh, "of type:", res.kind)
+  // fmt.println("Destroyed resource:", rh, "of type:", res.kind)
   // if render_data.texture.image != 0 {
   //   vk.DestroyImage(ctx.device, render_data.texture.image, nil)
   //   vk.FreeMemory(ctx.device, render_data.texture.image_memory, nil)

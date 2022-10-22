@@ -120,9 +120,15 @@ begin_render_pass :: proc(using rctx: ^RenderContext, render_pass_handle: Render
   sync.lock(&rctx.mutex)
   defer sync.unlock(&rctx.mutex)
 
+  return _begin_render_pass(rctx, render_pass_handle)
+}
+
+@(private) _begin_render_pass :: proc(using rctx: ^RenderContext, render_pass_handle: RenderPassResourceHandle) -> Error {
+  // fmt.println("begin_render_pass: ", rctx.status)
+
   // Validate State
   switch rctx.status {
-    case .RenderPass:
+    case .RenderPass, .StampRenderPass:
       // End the previous Render Pass
       vk.CmdEndRenderPass(rctx.command_buffer)
     case .EndedRenderPass:
@@ -137,6 +143,8 @@ begin_render_pass :: proc(using rctx: ^RenderContext, render_pass_handle: Render
   // render_context.present_framebuffer = swap_chain.present_framebuffers[render_context.swap_chain_index]
   // render_context.framebuffer_3d = swap_chain.framebuffers_3d[render_context.swap_chain_index]
   rp: ^RenderPass = auto_cast get_resource(&rctx.ctx.resource_manager, auto_cast render_pass_handle) or_return
+  // fmt.println("--render_pass.handle: ", render_pass_handle)
+  // fmt.println("--render_pass.config: ", rp.config)
   
   // -- Render Pass
   clear_value_count: u32 = 0
@@ -183,11 +191,19 @@ end_present :: proc(using rctx: ^RenderContext) -> Error {
 
   // Validate State
   switch rctx.status {
+    case .StampRenderPass:
+      // fmt.println("end_present: StampRenderPass -- rctx.followup_render_pass:", rctx.followup_render_pass)
+      // End the previous Render Pass
+      _begin_render_pass(rctx, rctx.followup_render_pass) or_return
+      rctx.followup_render_pass = auto_cast 0
+      fallthrough
     case .RenderPass:
+      // fmt.println("end_present: RenderPass")
       // End the previous Render Pass
       vk.CmdEndRenderPass(rctx.command_buffer)
       fallthrough
     case .EndedRenderPass:
+      // fmt.println("end_present: EndedRenderPass")
       // Empty
       rp: ^RenderPass = auto_cast get_resource(&rctx.ctx.resource_manager, auto_cast rctx.active_render_pass) or_return
       if .IsPresent not_in rp.config {

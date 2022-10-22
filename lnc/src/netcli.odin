@@ -131,12 +131,14 @@ _process_events :: proc(cli: ^HostInfo) -> Error {
 }
 
 _reconnect_to_server :: proc(cli: ^HostInfo) {
+  if cli.netdata.should_close do return
+
   event: enet.Event
   res: i32
 
-  time_diff := time.diff(time.now(), cli.netdata.connection_sequence_retry_time)
-  if time_diff >= 0 {
-    time.sleep(time_diff)
+  for time.now()._nsec < cli.netdata.connection_sequence_retry_time._nsec {
+    time.sleep(time.Millisecond * 200)
+    if cli.netdata.should_close do return
   }
   cli.netdata.connection_sequence_retries += 1
 
@@ -151,10 +153,10 @@ _reconnect_to_server :: proc(cli: ^HostInfo) {
   }
 
   // Wait for connection
-  for i in 0..<10 {
+  for i in 0..<25 {
     if cli.netdata.should_close do return
 
-    res = enet.host_service(cli.host, &event, 500)
+    res = enet.host_service(cli.host, &event, 200)
     if res == 0 do continue
 
     if res > 0 && event.type == .CONNECT {

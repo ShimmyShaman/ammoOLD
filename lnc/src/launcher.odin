@@ -151,7 +151,7 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
 
     // --- ### Handle User Input ### ---
     mu.begin(&muc)
-    if mu.begin_window(&muc, "My Window", mu.Rect{10, 10, 300, 400}) {
+    if mu.begin_window(&muc, "My Window", mu.Rect{10, 10, 200, 180}, { .AUTO_SIZE }) {
       /* process ui herevent... */
       if mu.button(&muc, "My Button") != nil {
         fmt.printf("'My Button' was pressed\n")
@@ -195,31 +195,32 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
 
     sq := mu.Rect{100, 100, 300, 200}
     co := mu.Color{220, 40, 185, 255}
-    vi.stamp_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co)
+    if vi.stamp_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co) != .Success do return .NotYetDetailed
     sq = mu.Rect{200, 200, 100, 300}
     co = mu.Color{255, 255, 15, 255}
-    vi.stamp_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co)
-    // cmd : ^mu.Command
-    // for mu.next_command(&muc, &cmd) {
-    //   // fmt.println("next_command:", cmd)
-    //   #partial switch v in cmd.variant {
-    //     case ^mu.Command_Text:
-    //       cmd_t : ^mu.Command_Text = auto_cast &cmd.variant
-    //       fmt.println("text:", cmd_t)
-    //     case ^mu.Command_Rect:
-    //       cmd_r : ^mu.Command_Rect = auto_cast &cmd.variant
-    //       fmt.println("rect:", cmd_r)
-    //       vi.stamp_colored_rect(rctx, handle_2d, auto_cast &cmd_r.rect, auto_cast &cmd_r.color)
-    //     case:
-    //       fmt.println("unknown command:", cmd.variant)
-    //     // case ^mu.Command_Jump:
-    //     //   fmt.println("jump:")
-    //     // case ^mu.Command_Icon:
-    //     //   fmt.println("icon:")
-    //     // case ^mu.Command_Clip:
-    //     //   fmt.println("clip:")
-    //   }
-    // }
+    if vi.stamp_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co) != .Success do return .NotYetDetailed
+    cmd : ^mu.Command
+    for mu.next_command(&muc, &cmd) {
+      // fmt.println("next_command:", cmd)
+      #partial switch v in cmd.variant {
+        case ^mu.Command_Text:
+          cmd_t : ^mu.Command_Text = auto_cast &cmd.variant
+          vi.stamp_text(rctx, handle_2d, cmd_t.font, cmd_t.text, cmd_t.pos.x, cmd_t.pos.y, cmd_t.color)
+          // fmt.println("text:", cmd_t)
+        case ^mu.Command_Rect:
+          cmd_r : ^mu.Command_Rect = auto_cast &cmd.variant
+          // fmt.println("rect:", cmd_r)
+          vi.stamp_colored_rect(rctx, handle_2d, auto_cast &cmd_r.rect, auto_cast &cmd_r.color)
+        case:
+          // fmt.println("unknown command:", cmd.variant)
+        // case ^mu.Command_Jump:
+        //   fmt.println("jump:")
+        // case ^mu.Command_Icon:
+        //   fmt.println("icon:")
+        // case ^mu.Command_Clip:
+        //   fmt.println("clip:")
+      }
+    }
 
     // if vi.stamp_end(rctx, handle_2d) != .Success do return .NotYetDetailed
 
@@ -230,10 +231,11 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     recent_frame_count += 1
 
     // Auto-Leave
-    //  if recent_frame_count > 0 do break
-    // if time.duration_seconds(time.diff(loop_start, now)) >= 1.5 {
-    //   break loop
+    // if recent_frame_count > 0 do break
+    // for !handle_window_events(&muc) or_return {
+    //   time.sleep(time.Millisecond)
     // }
+    // break
   }
 
   avg_fps := cast(int) (cast(f64)(historical_frame_count + recent_frame_count) / time.duration_seconds(time.diff(loop_start, now)))
@@ -250,7 +252,7 @@ handle_window_events :: proc(muc: ^mu.Context) -> (do_end_loop: bool, err: Error
   for sdl2.PollEvent(&event) {
 		#partial switch event.type {
       case .QUIT:
-        do_end_loop = false
+        do_end_loop = true
         return
       case .MOUSEMOTION:
         mu.input_mouse_move(muc, event.motion.x, event.motion.y)

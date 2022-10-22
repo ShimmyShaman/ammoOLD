@@ -33,6 +33,7 @@ Error :: enum {
   NoQueueAvailableOnDevice,
   AllocationFailed,
   ResourceNotFound,
+  InvalidState,
 }
 
 Context :: struct {
@@ -86,6 +87,7 @@ RenderContext :: struct {
   in_flight: vk.Fence,
 
   active_render_pass: RenderPassResourceHandle,
+  followup_render_pass: RenderPassResourceHandle,
   // present_framebuffer: vk.Framebuffer,
 
   image: vk.Image,
@@ -102,6 +104,7 @@ FrameRenderStateKind :: enum {
   Initializing,
   Initialized,
   RenderPass,
+  StampRenderPass,
   EndedRenderPass,
 }
 

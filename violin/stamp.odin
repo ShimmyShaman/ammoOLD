@@ -26,13 +26,34 @@ Color :: struct {
   a: u8,
 }
 
-init_stamp_batch_renderer :: proc(using ctx: ^Context, render_pass_config: RenderPassConfigFlags) -> (stamph: StampRenderResourceHandle, err: Error) {
+init_stamp_batch_renderer :: proc(using ctx: ^Context, render_pass_config: RenderPassConfigFlags,
+  uniform_buffer_size := 256 * 8 * 4) -> (stamph: StampRenderResourceHandle, err: Error) {
   // Create the resource
   stamph = auto_cast _create_resource(&resource_manager, .StampRenderResource) or_return
-  stampr : ^StampRenderResource = auto_cast get_resource_any(&resource_manager, auto_cast stamph) or_return
+  stampr: ^StampRenderResource = auto_cast get_resource_any(&resource_manager, auto_cast stamph) or_return
 
   // Create the render pass
-  stampr.render_pass = create_render_pass(ctx, render_pass_config) or_return
+  // HasPreviousColorPass = 0,
+	// IsPresent            = 1,
+  if .HasDepthBuffer in render_pass_config {
+    err = .NotYetDetailed
+    fmt.println("Error: init_stamp_batch_renderer>Depth buffer not supported in stamp batch renderer")
+    return
+  }
+  draw_rp_config, present_rp_config: RenderPassConfigFlags
+  draw_rp_config = {.HasPreviousColorPass}
+  if .HasPreviousColorPass not_in render_pass_config {
+    stampr.clear_render_pass = create_render_pass(ctx, {}) or_return
+  }
+  if .IsPresent in render_pass_config {
+    present_rp_config = {.HasPreviousColorPass, .IsPresent}
+  }
+  stampr.draw_render_pass = create_render_pass(ctx, draw_rp_config) or_return
+  fmt.println("created draw render pass:", stampr.draw_render_pass, "with config:", draw_rp_config)
+  if present_rp_config != nil {
+    stampr.present_render_pass = create_render_pass(ctx, present_rp_config) or_return
+    fmt.println("created present render pass:", stampr.present_render_pass, "with config:", present_rp_config)
+  }
   
   // Create the render programs
   Vertex :: struct {
@@ -108,7 +129,7 @@ init_stamp_batch_renderer :: proc(using ctx: ^Context, render_pass_config: Rende
     pipeline_config = PipelineCreateConfig {
       vertex_shader_filepath = vert_shader_path, // TODO
       fragment_shader_filepath = frag_shader_path,
-      render_pass = stampr.render_pass,
+      render_pass = stampr.draw_render_pass,
     },
     vertex_size = size_of(Vertex),
     buffer_bindings = color_bindings[:],
@@ -116,7 +137,8 @@ init_stamp_batch_renderer :: proc(using ctx: ^Context, render_pass_config: Rende
   }
   stampr.colored_rect_render_program = create_render_program(ctx, &colored_rect_rpci) or_return
   
-  stampr.uniform_buffer.capacity = auto_cast (size_of(f32) * 8 * 100) // TODO -- appropriate size
+  // Uniform Buffer
+  stampr.uniform_buffer.capacity = auto_cast (size_of(f32) * 8 * 256) // TODO -- appropriate size
   stampr.uniform_buffer.rh = create_uniform_buffer(ctx, stampr.uniform_buffer.capacity, .Dynamic) or_return
 
   // Ensure the created uniform buffer is HOST_VISIBLE for dynamic copying
@@ -161,14 +183,25 @@ __release_stamp_render_resource :: proc(using ctx: ^Context, tdr: ^StampRenderRe
   destroy_resource_any(ctx, tdr.uniform_buffer.rh)
 
   destroy_render_program(ctx, &tdr.colored_rect_render_program)
-  destroy_render_pass(ctx, tdr.render_pass)
+
+  if tdr.clear_render_pass != 0 do destroy_render_pass(ctx, tdr.clear_render_pass)
+  destroy_render_pass(ctx, tdr.draw_render_pass)
+  if tdr.present_render_pass != 0 do destroy_render_pass(ctx, tdr.present_render_pass)
 }
 
 stamp_begin :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResourceHandle) -> Error {
   stampr: ^StampRenderResource = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stamp_handle) or_return
 
+  if stampr.clear_render_pass != auto_cast 0 {
+    _begin_render_pass(rctx, stampr.clear_render_pass) or_return
+  }
+
   // Delegate
-  begin_render_pass(rctx, stampr.render_pass) or_return
+  begin_render_pass(rctx, stampr.draw_render_pass) or_return
+
+  // Redefine status
+  rctx.status = .StampRenderPass
+  rctx.followup_render_pass = stampr.present_render_pass
 
   // Reset Uniform Buffer Tracking
   stampr.uniform_buffer.utilization = 0
@@ -176,16 +209,23 @@ stamp_begin :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResourc
   return .Success
 }
 
-// stamp_end :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResourceHandle) -> Error {
-//   stampr: ^StampRenderResource = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stamp_handle) or_return
-
-//   if stampr.uniform_buffer_use_count > 0 {
-//     __stampr_draw_indexed(rctx, stampr) or_return
+// @(private) _stamp_restart_render_pass :: proc(using rctx: ^RenderContext, stampr: ^StampRenderResource) -> Error {
+//   if rctx.status != .StampRenderPass {
+//     fmt.eprintln("_stamp_restart_render_pass>invalid status. Invalid Call")
+//     return .InvalidState
 //   }
 
-//   // End Render Pass
-//   vk.CmdEndRenderPass(rctx.command_buffer)
-//   rctx.status = .EndedRenderPass
+//   // // End the current
+//   // vk.CmdEndRenderPass(command_buffer)
+
+//   // Delegate
+//   begin_render_pass(rctx, stampr.draw_render_pass) or_return
+
+//   // Redefine status
+//   rctx.status = .StampRenderPass
+
+//   // Reset Uniform Buffer Tracking
+//   stampr.uniform_buffer.utilization = 0
 
 //   return .Success
 // }
@@ -214,11 +254,9 @@ stamp_colored_rect :: proc(using rctx: ^RenderContext, stamp_handle: StampRender
   ubo_range: int : size_of(f32) * 8
 
   if ubo_offset + auto_cast ubo_range > stampr.uniform_buffer.capacity {
-    fmt.eprintln("stamp_colored_rect>uniform buffer offset + range exceeds buffer size. TODO -- reset render pass")
+    fmt.eprintln("Error] stamp_colored_rect> stamp uniform buffer is full. Too many calls for initial buffer size.",
+      "Consider increasing the buffer size")
     return .NotYetDetailed
-
-    // // Reset
-    // ubo_offset = 0
   }
   
   // Update the uniform buffer utilization
