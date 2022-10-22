@@ -26,6 +26,23 @@ Color :: struct {
   a: u8,
 }
 
+// typedef struct mcr_font_resource {
+//   const char *name;
+//   float height;
+//   float draw_vertical_offset;
+//   mcr_texture_image *texture;
+//   void *char_data;
+// } mcr_font_resource;
+
+FontResource :: struct {
+  name: string,
+  height: f32,
+  draw_vertical_offset: f32,
+  texture: ^ResourceHandle,
+  char_data: rawptr,
+}
+
+
 init_stamp_batch_renderer :: proc(using ctx: ^Context, render_pass_config: RenderPassConfigFlags,
   uniform_buffer_size := 256 * 8 * 4) -> (stamph: StampRenderResourceHandle, err: Error) {
   // Create the resource
@@ -342,3 +359,6 @@ stamp_colored_rect :: proc(using rctx: ^RenderContext, stamp_handle: StampRender
 
   return .Success
 }
+
+// vi.stamp_text(rctx, handle_2d, cmd_t.font, cmd_t.text, cmd_t.pos.x, cmd_t.pos.y, cmd_t.color)
+stamp_text :: proc(using rctx: ^RenderContext, )

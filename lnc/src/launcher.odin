@@ -72,11 +72,17 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
   handle_2d: vi.StampRenderResourceHandle
   handle_2d, err = vi.init_stamp_batch_renderer(ctx, { .IsPresent }) // .HasPreviousColorPass,
   if err != .Success {
-    fmt.println("create_render_pass 2D error")
+    fmt.println("init_stamp_batch_renderer error")
     return .NotYetDetailed
   }
   defer vi.destroy_resource(ctx, handle_2d)
  
+  font: vi.FontResourceHandle
+  font, err = vi.load_font(ctx, "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf", 16)
+  if err != .Success {
+    fmt.println("load_font error")
+    return .NotYetDetailed
+  }
   // Resources
   // rd2: vi.RenderData
   // rp2: vi.RenderProgram
@@ -199,28 +205,30 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     sq = mu.Rect{200, 200, 100, 300}
     co = mu.Color{255, 255, 15, 255}
     if vi.stamp_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co) != .Success do return .NotYetDetailed
-    cmd : ^mu.Command
-    for mu.next_command(&muc, &cmd) {
-      // fmt.println("next_command:", cmd)
-      #partial switch v in cmd.variant {
-        case ^mu.Command_Text:
-          cmd_t : ^mu.Command_Text = auto_cast &cmd.variant
-          vi.stamp_text(rctx, handle_2d, cmd_t.font, cmd_t.text, cmd_t.pos.x, cmd_t.pos.y, cmd_t.color)
-          // fmt.println("text:", cmd_t)
-        case ^mu.Command_Rect:
-          cmd_r : ^mu.Command_Rect = auto_cast &cmd.variant
-          // fmt.println("rect:", cmd_r)
-          vi.stamp_colored_rect(rctx, handle_2d, auto_cast &cmd_r.rect, auto_cast &cmd_r.color)
-        case:
-          // fmt.println("unknown command:", cmd.variant)
-        // case ^mu.Command_Jump:
-        //   fmt.println("jump:")
-        // case ^mu.Command_Icon:
-        //   fmt.println("icon:")
-        // case ^mu.Command_Clip:
-        //   fmt.println("clip:")
-      }
-    }
+
+    // vi.stamp_text(rctx, handle_2d,  "Hello World", mu.Rect{100, 100, 300, 200}, mu.Color{255, 255, 255, 255}, 0.0, 0.0, 0.0, 0.0)
+    // cmd : ^mu.Command
+    // for mu.next_command(&muc, &cmd) {
+    //   // fmt.println("next_command:", cmd)
+    //   #partial switch v in cmd.variant {
+    //     case ^mu.Command_Text:
+    //       cmd_t : ^mu.Command_Text = auto_cast &cmd.variant
+    //       vi.stamp_text(rctx, handle_2d, cmd_t.font, cmd_t.text, cmd_t.pos.x, cmd_t.pos.y, cmd_t.color)
+    //       // fmt.println("text:", cmd_t)
+    //     case ^mu.Command_Rect:
+    //       cmd_r : ^mu.Command_Rect = auto_cast &cmd.variant
+    //       // fmt.println("rect:", cmd_r)
+    //       vi.stamp_colored_rect(rctx, handle_2d, auto_cast &cmd_r.rect, auto_cast &cmd_r.color)
+    //     case:
+    //       // fmt.println("unknown command:", cmd.variant)
+    //     // case ^mu.Command_Jump:
+    //     //   fmt.println("jump:")
+    //     // case ^mu.Command_Icon:
+    //     //   fmt.println("icon:")
+    //     // case ^mu.Command_Clip:
+    //     //   fmt.println("clip:")
+    //   }
+    // }
 
     // if vi.stamp_end(rctx, handle_2d) != .Success do return .NotYetDetailed
 

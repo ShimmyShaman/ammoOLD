@@ -370,7 +370,6 @@ compile_shader :: proc(shader_src_path: string, kind: ShaderKind) -> (data: []u8
     return
   }
 
-
   return
 }
 

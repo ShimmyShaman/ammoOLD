@@ -32,6 +32,7 @@ VertexBufferResourceHandle :: distinct ResourceHandle
 IndexBufferResourceHandle :: distinct ResourceHandle
 RenderPassResourceHandle :: distinct ResourceHandle
 StampRenderResourceHandle :: distinct ResourceHandle
+FontResourceHandle :: distinct ResourceHandle
 
 ResourceKind :: enum {
   Buffer = 1,
@@ -1102,5 +1103,140 @@ create_render_program :: proc(ctx: ^Context, info: ^RenderProgramCreateInfo) -> 
     &rp.descriptor_layout) or_return
 
   // fmt.println("create_render_program return")
+  return
+}
+
+// FontResourceHandle
+// 
+// VkResult mvk_load_font(vk_render_state *p_vkrs, const char *const filepath, float font_height,
+//   mcr_font_resource **p_resource)
+// {
+// VkResult res;
+
+load_font :: proc(using ctx: ^Context, ttf_filepath: string, font_height: f32) -> (fh: FontResourceHandle, err: Error) {
+// // Font is a common resource -- check font cache for existing -- TODO?
+// char *font_name;
+// {
+// int index_of_last_slash = -1;
+// for (int i = 0;; i++) {
+// if (filepath[i] == '\0') {
+// printf("INVALID FORMAT filepath='%s'\n", filepath);
+// return VK_ERROR_UNKNOWN;
+// }
+// if (filepath[i] == '.') {
+// int si = index_of_last_slash >= 0 ? (index_of_last_slash + 1) : 0;
+// font_name = (char *)malloc(sizeof(char) * (i - si + 1));
+// strncpy(font_name, filepath + si, i - si);
+// font_name[i - si] = '\0';
+// break;
+// }
+// else if (filepath[i] == '\\' || filepath[i] == '/') {
+// index_of_last_slash = i;
+// }
+// }
+
+// for (int i = 0; i < p_vkrs->loaded_fonts.count; ++i) {
+// if (p_vkrs->loaded_fonts.fonts[i]->height == font_height &&
+// !strcmp(p_vkrs->loaded_fonts.fonts[i]->name, font_name)) {
+// *p_resource = p_vkrs->loaded_fonts.fonts[i];
+
+// printf("using cached font texture> name:%s height:%.2f resource_uid:%u\n", font_name, font_height,
+// (*p_resource)->texture->resource_uid);
+// free(font_name);
+
+// return VK_SUCCESS;
+// }
+// }
+// }
+
+// Load font
+// stbi_uc ttf_buffer[1 << 20];
+// fread(ttf_buffer, 1, 1 << 20, fopen(filepath, "rb"));
+  // ttf_buffer[]
+  file, oerr := os.open(ttf_filepath)
+
+
+  errno: os.Errno
+  h_ttf: os.Handle
+
+  // Open the source file
+  h_ttf, errno = os.open(ttf_filepath)
+  if errno != os.ERROR_NONE {
+    fmt.printf("Error File I/O: couldn't open font path='%s' set full path accordingly\n", ttf_filepath)
+    err = .NotYetDetailed
+    return
+  }
+  defer os.close(h_ttf)
+
+  // read_success: bool
+  data, read_success := os.read_entire_file_from_handle(h_ttf)
+  if !read_success {
+    fmt.println("Could not read full ttf font file:", ttf_filepath)
+    err = .NotYetDetailed
+    return
+  }
+  defer delete(data)
+
+// const int texWidth = 256, texHeight = 256, texChannels = 4;
+// stbi_uc temp_bitmap[texWidth * texHeight];
+// stbtt_bakedchar *cdata = (stbtt_bakedchar *)malloc(sizeof(stbtt_bakedchar) * 96); // ASCII 32..126 is 95 glyphs
+// stbtt_BakeFontBitmap(ttf_buffer, 0, font_height, temp_bitmap, texWidth, texHeight, 32, 96,
+//   cdata); // no guarantee this fits!
+
+// // printf("garbagein: font_height:%f\n", font_height);
+// stbi_uc pixels[texWidth * texHeight * 4];
+// {
+// int p = 0;
+// for (int i = 0; i < texWidth * texHeight; ++i) {
+// pixels[p++] = temp_bitmap[i];
+// pixels[p++] = temp_bitmap[i];
+// pixels[p++] = temp_bitmap[i];
+// pixels[p++] = 255;
+// }
+// }
+
+// mcr_texture_image *texture;
+// res = mvk_load_image_sampler(p_vkrs, texWidth, texHeight, texChannels, MVK_IMAGE_USAGE_READ_ONLY, pixels, &texture);
+// VK_CHECK(res, "mvk_load_image_sampler");
+
+// append_to_collection((void ***)&p_vkrs->textures.items, &p_vkrs->textures.alloc, &p_vkrs->textures.count, texture);
+
+// // Font is a common resource -- cache so multiple loads reference the same resource uid
+// {
+// mcr_font_resource *font = (mcr_font_resource *)malloc(sizeof(mcr_font_resource));
+// append_to_collection((void ***)&p_vkrs->loaded_fonts.fonts, &p_vkrs->loaded_fonts.capacity,
+//     &p_vkrs->loaded_fonts.count, font);
+
+// font->name = font_name;
+// font->height = font_height;
+// font->texture = texture;
+// font->char_data = cdata;
+// {
+// float lowest = 500;
+// for (int ci = 0; ci < 96; ++ci) {
+// stbtt_aligned_quad q;
+
+// // printf("garbagein: %i %i %f %f %i\n", (int)font_image->width, (int)font_image->height, align_x, align_y,
+// // letter
+// // - 32);
+// float ax = 100, ay = 300;
+// stbtt_GetBakedQuad(cdata, (int)texWidth, (int)texHeight, ci, &ax, &ay, &q, 1);
+// if (q.y0 < lowest)
+// lowest = q.y0;
+// // printf("baked_quad: s0=%.2f s1==%.2f t0=%.2f t1=%.2f x0=%.2f x1=%.2f y0=%.2f y1=%.2f lowest=%.3f\n", q.s0,
+// // q.s1,
+// //        q.t0, q.t1, q.x0, q.x1, q.y0, q.y1, lowest);
+// }
+// font->draw_vertical_offset = 300 - lowest;
+// }
+
+// *p_resource = font;
+// printf("generated font resource> name:%s height:%.2f resource_uid:%u\n", font_name, font_height,
+// font->texture->resource_uid);
+// }
+
+// return res;
+  fmt.println("load_font> NotYetImplemented")
+  err = .NotYetImplemented
   return
 }
