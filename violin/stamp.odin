@@ -47,7 +47,7 @@ init_stamp_batch_renderer :: proc(using ctx: ^Context, render_pass_config: Rende
   uniform_buffer_size := 256 * 8 * 4) -> (stamph: StampRenderResourceHandle, err: Error) {
   // Create the resource
   stamph = auto_cast _create_resource(&resource_manager, .StampRenderResource) or_return
-  stampr: ^StampRenderResource = auto_cast get_resource_any(&resource_manager, auto_cast stamph) or_return
+  stampr: ^StampRenderResource = auto_cast _get_resource(&resource_manager, auto_cast stamph) or_return
 
   // Create the render pass
   // HasPreviousColorPass = 0,
@@ -126,33 +126,39 @@ init_stamp_batch_renderer :: proc(using ctx: ^Context, render_pass_config: Rende
     },
   }
 
-  vert_shader_path, ae1 :=  strings.concatenate_safe({ctx.violin_package_relative_path, "violin/shaders/colored_rect.vert"},
-    context.temp_allocator)
-  if ae1 != .None {
-    err = .AllocationFailed
+  get_shader_path :: proc(violin_package_relative_path: string, name: string) -> (shader_path: string, err: Error) {
+    aerr: mem.Allocator_Error
+    shader_path, aerr =  strings.concatenate_safe({violin_package_relative_path, name},
+      context.temp_allocator)
+    if aerr != .None {
+      err = .AllocationFailed
+    }
     return
   }
-  fmt.println("vert_shader_path:", vert_shader_path)
-  // defer delete(vert_shader_path)
-  frag_shader_path, ae2 :=  strings.concatenate_safe({ctx.violin_package_relative_path, "violin/shaders/colored_rect.frag"},
-    context.temp_allocator)
-  if ae2 != .None {
-    err = .AllocationFailed
-    return
-  }
-  // defer delete_string(frag_shader_path)
 
-  colored_rect_rpci := RenderProgramCreateInfo {
+  render_program_create_info := RenderProgramCreateInfo {
     pipeline_config = PipelineCreateConfig {
-      vertex_shader_filepath = vert_shader_path, // TODO
-      fragment_shader_filepath = frag_shader_path,
+      vertex_shader_filepath = get_shader_path(ctx.violin_package_relative_path, "violin/shaders/colored_rect.vert") or_return,
+      fragment_shader_filepath = get_shader_path(ctx.violin_package_relative_path, "violin/shaders/colored_rect.frag") or_return,
       render_pass = stampr.draw_render_pass,
     },
     vertex_size = size_of(Vertex),
     buffer_bindings = color_bindings[:],
     input_attributes = inputs[:],
   }
-  stampr.colored_rect_render_program = create_render_program(ctx, &colored_rect_rpci) or_return
+  stampr.colored_rect_render_program = create_render_program(ctx, &render_program_create_info) or_return
+
+  render_program_create_info = RenderProgramCreateInfo {
+    pipeline_config = PipelineCreateConfig {
+      vertex_shader_filepath = get_shader_path(ctx.violin_package_relative_path, "violin/shaders/textured_rect.vert") or_return,
+      fragment_shader_filepath = get_shader_path(ctx.violin_package_relative_path, "violin/shaders/textured_rect.frag") or_return,
+      render_pass = stampr.draw_render_pass,
+    },
+    vertex_size = size_of(Vertex),
+    buffer_bindings = color_bindings[:],
+    input_attributes = inputs[:],
+  }
+  stampr.textured_rect_render_program = create_render_program(ctx, &render_program_create_info) or_return
   
   // Uniform Buffer
   stampr.uniform_buffer.capacity = auto_cast (size_of(f32) * 8 * 256) // TODO -- appropriate size
@@ -160,7 +166,7 @@ init_stamp_batch_renderer :: proc(using ctx: ^Context, render_pass_config: Rende
 
   // Ensure the created uniform buffer is HOST_VISIBLE for dynamic copying
   {
-    ubr: ^Buffer = auto_cast get_resource_any(&resource_manager, auto_cast stampr.uniform_buffer.rh) or_return
+    ubr: ^Buffer = auto_cast _get_resource(&resource_manager, auto_cast stampr.uniform_buffer.rh) or_return
     mem_property_flags: vk.MemoryPropertyFlags
     vma.GetAllocationMemoryProperties(vma_allocator, ubr.allocation, &mem_property_flags)
     if vk.MemoryPropertyFlag.HOST_VISIBLE not_in mem_property_flags {
@@ -207,7 +213,7 @@ __release_stamp_render_resource :: proc(using ctx: ^Context, tdr: ^StampRenderRe
 }
 
 stamp_begin :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResourceHandle) -> Error {
-  stampr: ^StampRenderResource = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stamp_handle) or_return
+  stampr: ^StampRenderResource = auto_cast _get_resource(&rctx.ctx.resource_manager, auto_cast stamp_handle) or_return
 
   if stampr.clear_render_pass != auto_cast 0 {
     _begin_render_pass(rctx, stampr.clear_render_pass) or_return
@@ -249,10 +255,10 @@ stamp_begin :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResourc
 
 stamp_colored_rect :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResourceHandle, rect: ^Rect, color: ^Color) -> Error {
   // Obtain the resources
-  stampr: ^StampRenderResource = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stamp_handle) or_return
-  vbuf: ^VertexBuffer = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stampr.rect_vertex_buffer) or_return
-  ibuf: ^IndexBuffer = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stampr.rect_index_buffer) or_return
-  ubuf: ^Buffer = auto_cast get_resource_any(&rctx.ctx.resource_manager, auto_cast stampr.uniform_buffer.rh) or_return
+  stampr: ^StampRenderResource = auto_cast _get_resource(&rctx.ctx.resource_manager, auto_cast stamp_handle) or_return
+  vbuf: ^VertexBuffer = auto_cast _get_resource(&rctx.ctx.resource_manager, auto_cast stampr.rect_vertex_buffer) or_return
+  ibuf: ^IndexBuffer = auto_cast _get_resource(&rctx.ctx.resource_manager, auto_cast stampr.rect_index_buffer) or_return
+  ubuf: ^Buffer = auto_cast _get_resource(&rctx.ctx.resource_manager, auto_cast stampr.uniform_buffer.rh) or_return
 
   // Write the input to the uniform buffer
   parameter_data := [8]f32 {
@@ -360,5 +366,116 @@ stamp_colored_rect :: proc(using rctx: ^RenderContext, stamp_handle: StampRender
   return .Success
 }
 
+stamp_textured_rect :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResourceHandle, txh: TextureResourceHandle,
+  rect: ^Rect) -> Error {
+  // Obtain the resources
+  stampr: ^StampRenderResource = auto_cast _get_resource(&rctx.ctx.resource_manager, auto_cast stamp_handle) or_return
+  texture: ^Texture = auto_cast _get_resource(&rctx.ctx.resource_manager, auto_cast txh) or_return
+  vbuf: ^VertexBuffer = auto_cast _get_resource(&rctx.ctx.resource_manager, auto_cast stampr.rect_vertex_buffer) or_return
+  ibuf: ^IndexBuffer = auto_cast _get_resource(&rctx.ctx.resource_manager, auto_cast stampr.rect_index_buffer) or_return
+  ubuf: ^Buffer = auto_cast _get_resource(&rctx.ctx.resource_manager, auto_cast stampr.uniform_buffer.rh) or_return
+
+  // Write the input to the uniform buffer
+  parameter_data := [4]f32 {
+    auto_cast rect.x / cast(f32)rctx.ctx.swap_chain.extent.width,
+    auto_cast rect.y / cast(f32)rctx.ctx.swap_chain.extent.height,
+    auto_cast rect.w / cast(f32)rctx.ctx.swap_chain.extent.width,
+    auto_cast rect.h / cast(f32)rctx.ctx.swap_chain.extent.height,
+  }
+
+  // Write to the HOST_VISIBLE memory
+  ubo_offset: vk.DeviceSize = auto_cast stampr.uniform_buffer.utilization
+  ubo_range: int : size_of(f32) * 8
+
+  if ubo_offset + auto_cast ubo_range > stampr.uniform_buffer.capacity {
+    fmt.eprintln("Error] stamp_colored_rect> stamp uniform buffer is full. Too many calls for initial buffer size.",
+      "Consider increasing the buffer size")
+    return .NotYetDetailed
+  }
+  
+  // Update the uniform buffer utilization
+  stampr.uniform_buffer.utilization += max(cast(vk.DeviceSize) ubo_range, stampr.uniform_buffer.device_min_block_alignment)
+  
+  // Write to the buffer
+  copy_dst: rawptr = auto_cast (cast(uintptr)ubuf.allocation_info.pMappedData + auto_cast ubo_offset)
+  mem.copy(copy_dst, auto_cast &parameter_data[0], ubo_range)
+
+  // Setup viewport and clip --- TODO this ain't true
+  _set_viewport_cmd(command_buffer, 0, 0, auto_cast ctx.swap_chain.extent.width,
+    auto_cast ctx.swap_chain.extent.height)
+  _set_scissor_cmd(command_buffer, 0, 0, ctx.swap_chain.extent.width, ctx.swap_chain.extent.height)
+
+  // Queue Buffer Write
+  MAX_DESC_SET_WRITES :: 8
+  writes: [MAX_DESC_SET_WRITES]vk.WriteDescriptorSet
+  buffer_infos: [1]vk.DescriptorBufferInfo
+  buffer_info_index := 0
+  write_index := 0
+  
+  // Allocate the descriptor set from the pool
+  descriptor_set_index := descriptor_sets_index
+
+  set_alloc_info := vk.DescriptorSetAllocateInfo {
+    sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+    // Use the descriptor pool we created earlier (the one dedicated to this frame)
+    descriptorPool = descriptor_pool,
+    descriptorSetCount = 1,
+    pSetLayouts = &stampr.textured_rect_render_program.descriptor_layout,
+  }
+  vkres := vk.AllocateDescriptorSets(ctx.device, &set_alloc_info, &descriptor_sets[descriptor_set_index])
+  if vkres != .SUCCESS {
+    fmt.eprintln("vkAllocateDescriptorSets failed:", vkres)
+    return .NotYetDetailed
+  }
+  desc_set := descriptor_sets[descriptor_set_index]
+  descriptor_sets_index += set_alloc_info.descriptorSetCount
+
+  // Describe the uniform buffer binding
+  buffer_infos[0].buffer = ubuf.buffer
+  buffer_infos[0].offset = ubo_offset
+  buffer_infos[0].range = auto_cast ubo_range
+
+  // Element Vertex Shader Uniform Buffer
+  write := &writes[write_index]
+  write_index += 1
+
+  write.sType = .WRITE_DESCRIPTOR_SET
+  write.dstSet = desc_set
+  write.descriptorCount = 1
+  write.descriptorType = .UNIFORM_BUFFER
+  write.pBufferInfo = &buffer_infos[0]
+  write.dstArrayElement = 0
+  write.dstBinding = stampr.textured_rect_render_program.layout_bindings[0].binding
+  
+  vk.UpdateDescriptorSets(ctx.device, auto_cast write_index, &writes[0], 0, nil)
+
+  vk.CmdBindDescriptorSets(command_buffer, .GRAPHICS, stampr.textured_rect_render_program.pipeline.layout, 0, 1, &desc_set, 0, nil)
+
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, stampr.textured_rect_render_program.pipeline.handle)
+
+  vk.CmdBindIndexBuffer(command_buffer, ibuf.buffer, 0, ibuf.index_type) // TODO -- support other index types
+
+  // const VkDeviceSize offsets[1] = {0};
+  // vkCmdBindVertexBuffers(command_buffer, 0, 1, &cmd->render_program.data->vertices->buf, offsets);
+  // // vkCmdDraw(command_buffer, 3 * 2 * 6, 1, 0, 0);
+  // int index_draw_count = cmd->render_program.data->specific_index_draw_count;
+  // if (!index_draw_count)
+  //   index_draw_count = cmd->render_program.data->indices->capacity;
+  offsets: vk.DeviceSize = 0
+  vk.CmdBindVertexBuffers(command_buffer, 0, 1, &vbuf.buffer, &offsets)
+  // TODO -- specific index draw count
+
+  // // printf("index_draw_count=%i\n", index_draw_count);
+  // // printf("cmd->render_program.data->indices->capacity=%i\n", cmd->render_program.data->indices->capacity);
+  // // printf("cmd->render_program.data->specific_index_draw_count=%i\n",
+  // //        cmd->render_program.data->specific_index_draw_count);
+
+  // vkCmdDrawIndexed(command_buffer, index_draw_count, 1, 0, 0, 0);
+  vk.CmdDrawIndexed(command_buffer, auto_cast ibuf.index_count, 1, 0, 0, 0) // TODO -- index_count as u32?
+  // fmt.print("ibuf.index_count:", ibuf.index_count)
+
+  return .Success
+}
+
 // vi.stamp_text(rctx, handle_2d, cmd_t.font, cmd_t.text, cmd_t.pos.x, cmd_t.pos.y, cmd_t.color)
-stamp_text :: proc(using rctx: ^RenderContext, )
+// stamp_text :: proc(using rctx: ^RenderContext, )

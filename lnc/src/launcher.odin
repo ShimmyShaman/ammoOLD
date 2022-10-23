@@ -76,13 +76,18 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     return .NotYetDetailed
   }
   defer vi.destroy_resource(ctx, handle_2d)
+
+  parth: vi.TextureResourceHandle
+  parth, err = vi.load_texture_from_file(ctx, "res/textures/parthenon.jpg")
+  if err != .Success do return .NotYetDetailed
+  defer vi.destroy_resource(ctx, parth)
  
-  font: vi.FontResourceHandle
-  font, err = vi.load_font(ctx, "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf", 16)
-  if err != .Success {
-    fmt.println("load_font error")
-    return .NotYetDetailed
-  }
+  // font: vi.FontResourceHandle
+  // font, err = vi.load_font(ctx, "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf", 16)
+  // if err != .Success {
+  //   fmt.println("load_font error")
+  //   return .NotYetDetailed
+  // }
   // Resources
   // rd2: vi.RenderData
   // rp2: vi.RenderProgram
@@ -170,10 +175,7 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     // --- ### Draw the Frame ### ---
     // post_processing = false // So there is no intemediary render target draw... Everything is straight to present
     rctx, verr = vi.begin_present(ctx)
-    if verr != .Success {
-      fmt.println("begin_present error")
-      return .NotYetDetailed
-    }
+    if verr != .Success do return .NotYetDetailed
 
     // 3D
     // if vi.begin_render_pass(rctx, rpass3d) != .Success do break loop
@@ -205,6 +207,9 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     sq = mu.Rect{200, 200, 100, 300}
     co = mu.Color{255, 255, 15, 255}
     if vi.stamp_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co) != .Success do return .NotYetDetailed
+    sq = mu.Rect{280, 60, 420, 410}
+    // // co = mu.Color{255, 255, 15, 255}
+    if vi.stamp_textured_rect(rctx, handle_2d, parth, auto_cast &sq) != .Success do return .NotYetDetailed
 
     // vi.stamp_text(rctx, handle_2d,  "Hello World", mu.Rect{100, 100, 300, 200}, mu.Color{255, 255, 255, 255}, 0.0, 0.0, 0.0, 0.0)
     // cmd : ^mu.Command
@@ -240,10 +245,10 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
 
     // Auto-Leave
     // if recent_frame_count > 0 do break
-    // for !handle_window_events(&muc) or_return {
-    //   time.sleep(time.Millisecond)
-    // }
-    // break
+    for !handle_window_events(&muc) or_return {
+      time.sleep(time.Millisecond)
+    }
+    break
   }
 
   avg_fps := cast(int) (cast(f64)(historical_frame_count + recent_frame_count) / time.duration_seconds(time.diff(loop_start, now)))

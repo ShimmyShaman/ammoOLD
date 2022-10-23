@@ -9,6 +9,7 @@ import "core:sync"
 import vk "vendor:vulkan"
 // import stb "vendor:stb/lib"
 import stbi "vendor:stb/image"
+import stbtt "vendor:stb/truetype"
 import vma "../deps/odin-vma"
 
 // https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/usage_patterns.html
@@ -28,6 +29,7 @@ BufferUsage :: enum {
 }
 
 ResourceHandle :: distinct int
+TextureResourceHandle :: distinct ResourceHandle
 VertexBufferResourceHandle :: distinct ResourceHandle
 IndexBufferResourceHandle :: distinct ResourceHandle
 RenderPassResourceHandle :: distinct ResourceHandle
@@ -49,9 +51,12 @@ Resource :: struct {
   data: union { Buffer, Texture, DepthBuffer, RenderPass, StampRenderResource, VertexBuffer, IndexBuffer },
 }
 
-ImageSamplerUsage :: enum {
-  ReadOnly = 1,
-  RenderTarget,
+ImageUsage :: enum {
+  ShaderReadOnly = 1,
+  // ColorAttachment,
+  // DepthStencilAttachment,
+  // RenderTarget,
+  // Present_KHR,
 }
 
 Buffer :: struct {
@@ -62,16 +67,22 @@ Buffer :: struct {
 }
 
 Texture :: struct {
-  sampler_usage: ImageSamplerUsage,
+  sampler_usage: ImageUsage,
   width: u32,
   height: u32,
-  size: u32,
-  format: vk.Format,
+  size:   vk.DeviceSize,
+  // format: vk.Format,
   image: vk.Image,
-  image_memory: vk.DeviceMemory,
+  // image_memory: vk.DeviceMemory,
   image_view: vk.ImageView,
-  framebuffer: vk.Framebuffer,
+  // framebuffer: vk.Framebuffer,
   sampler: vk.Sampler,
+  allocation: vma.Allocation,
+  allocation_info: vma.AllocationInfo,
+
+  format: vk.Format,
+  current_layout: vk.ImageLayout,
+  intended_usage: ImageUsage,
 }
 
 DepthBuffer :: struct {
@@ -105,6 +116,7 @@ RenderPass :: struct {
 StampRenderResource :: struct {
   clear_render_pass, draw_render_pass, present_render_pass: RenderPassResourceHandle,
   colored_rect_render_program: RenderProgram,
+  textured_rect_render_program: RenderProgram,
   rect_vertex_buffer: VertexBufferResourceHandle,
   rect_index_buffer: IndexBufferResourceHandle,
 
@@ -187,7 +199,7 @@ _resource_manager_report :: proc(using rm: ^ResourceManager) {
   fmt.println("  Resource Index: ", resource_index)
 }
 
-get_resource_any :: proc(using rm: ^ResourceManager, rh: ResourceHandle) -> (ptr: rawptr, err: Error) {
+_get_resource :: proc(using rm: ^ResourceManager, rh: ResourceHandle) -> (ptr: rawptr, err: Error) {
   res := resource_map[rh]
   if res == nil {
     err = .ResourceNotFound
@@ -201,11 +213,11 @@ get_resource_any :: proc(using rm: ^ResourceManager, rh: ResourceHandle) -> (ptr
 }
 
 get_resource_render_pass :: proc(using rm: ^ResourceManager, rh: RenderPassResourceHandle) -> (ptr: ^RenderPass, err: Error) {
-  ptr = auto_cast get_resource_any(rm, auto_cast rh) or_return
+  ptr = auto_cast _get_resource(rm, auto_cast rh) or_return
   return
 }
 
-get_resource :: proc {get_resource_any, get_resource_render_pass}
+get_resource :: proc {_get_resource, get_resource_render_pass}
 
 destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
   vk.DeviceWaitIdle(ctx.device)
@@ -219,10 +231,13 @@ destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
   switch res.kind {
     case .Texture:
       texture : ^Texture = auto_cast &res.data
-      vk.DestroyImage(ctx.device, texture.image, nil)
-      vk.FreeMemory(ctx.device, texture.image_memory, nil)
-      vk.DestroyImageView(ctx.device, texture.image_view, nil)
-      vk.DestroySampler(ctx.device, texture.sampler, nil)
+      vma.DestroyImage(vma_allocator, texture.image, texture.allocation)
+      if texture.image_view != 0 {
+        vk.DestroyImageView(ctx.device, texture.image_view, nil)
+      }
+      if texture.sampler != 0 {
+        vk.DestroySampler(ctx.device, texture.sampler, nil)
+      }
     case .Buffer:
       buffer : ^Buffer = auto_cast &res.data
       vma.DestroyBuffer(vma_allocator, buffer.buffer, buffer.allocation)
@@ -275,6 +290,10 @@ destroy_render_pass :: proc(using ctx: ^Context, rh: RenderPassResourceHandle) -
   return destroy_resource_any(ctx, auto_cast rh)
 }
 
+destroy_texture :: proc(using ctx: ^Context, rh: TextureResourceHandle) -> Error {
+  return destroy_resource_any(ctx, auto_cast rh)
+}
+
 destroy_vertex_buffer :: proc(using ctx: ^Context, rh: VertexBufferResourceHandle) -> Error {
   return destroy_resource_any(ctx, auto_cast rh)
 }
@@ -287,7 +306,7 @@ destroy_ui_render_resource :: proc(using ctx: ^Context, rh: StampRenderResourceH
   return destroy_resource_any(ctx, auto_cast rh)
 }
 
-destroy_resource :: proc {destroy_resource_any, destroy_render_pass, destroy_vertex_buffer, destroy_index_buffer,
+destroy_resource :: proc {destroy_resource_any, destroy_render_pass, destroy_texture, destroy_vertex_buffer, destroy_index_buffer,
   destroy_ui_render_resource}
 
 _resize_framebuffer_resources :: proc(using ctx: ^Context) -> Error {
@@ -393,9 +412,9 @@ transition_image_layout :: proc(ctx: ^Context, image: vk.Image, format: vk.Forma
     barrier.dstAccessMask = { .SHADER_READ }
     
     source_stage = { .TRANSFER }
-    destination_stage = { .FRAGMENT_SHADER }
+    destination_stage = { .FRAGMENT_SHADER } // TODO -- VertexShader?
   } else {
-    fmt.eprintln("unsupported layout transition")
+    fmt.eprintln("ERROR transition_image_layout> unsupported layout transition:", old_layout, "to", new_layout)
     return .NotYetDetailed
   }
   
@@ -406,127 +425,104 @@ transition_image_layout :: proc(ctx: ^Context, image: vk.Image, format: vk.Forma
   return .Success
 }
 
-copy_buffer_to_image :: proc(ctx: ^Context, buffer: vk.Buffer, image: vk.Image, width: u32, height: u32) -> Error {
+write_to_texture :: proc(using ctx: ^Context, dst: TextureResourceHandle, data: rawptr, size_in_bytes: int) -> Error {
+  texture: ^Texture = auto_cast _get_resource(&resource_manager, auto_cast dst) or_return
+
+  // Transition Image Layout
+  transition_image_layout(ctx, texture.image, texture.format, texture.current_layout, .TRANSFER_DST_OPTIMAL) or_return
+
+  // Get the created buffers memory properties
+  mem_property_flags: vk.MemoryPropertyFlags
+  vma.GetAllocationMemoryProperties(vma_allocator, texture.allocation, &mem_property_flags)
   
-  _begin_single_time_commands(ctx) or_return
+  if vk.MemoryPropertyFlag.HOST_VISIBLE in mem_property_flags {
+    // Allocation ended up in a mappable memory and is already mapped - write to it directly.
+    // [Executed in runtime]:
+    mem.copy(texture.allocation_info.pMappedData, data, size_in_bytes)
+  } else {
+    // Create a staging buffer
+    staging_buffer_create_info := vk.BufferCreateInfo {
+      sType = .BUFFER_CREATE_INFO,
+      size = auto_cast size_in_bytes,
+      usage = {.TRANSFER_SRC},
+    }
+
+    staging_allocation_create_info := vma.AllocationCreateInfo {
+      usage = .AUTO,
+      flags = {.HOST_ACCESS_SEQUENTIAL_WRITE, .MAPPED},
+    }
+    
+    staging: Buffer
+    vkres := vma.CreateBuffer(vma_allocator, &staging_buffer_create_info, &staging_allocation_create_info, &staging.buffer,
+      &staging.allocation, &staging.allocation_info)
+    if vkres != .SUCCESS {
+      fmt.eprintln("write_to_buffer>vmaCreateBuffer failed:", vkres)
+      return .NotYetDetailed
+    }
+    defer vma.DestroyBuffer(vma_allocator, staging.buffer, staging.allocation)
+
+    // Copy data to the staging buffer
+    mem.copy(staging.allocation_info.pMappedData, data, size_in_bytes)
+
+    // Copy buffers
+    _begin_single_time_commands(ctx) or_return
+
+    // copy_region := vk.BufferCopy {
+    //   srcOffset = 0,
+    //   dstOffset = 0,
+    //   size = auto_cast size_in_bytes,
+    // }
+    // vk.CmdCopyBuffer(ctx.st_command_buffer, staging.buffer, buffer.buffer, 1, &copy_region)
+    region := vk.BufferImageCopy {
+      bufferOffset = 0,
+      bufferRowLength = 0,
+      bufferImageHeight = 0,
+      imageSubresource = vk.ImageSubresourceLayers {
+        aspectMask = { .COLOR },
+        mipLevel = 0,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+      // imageOffset = vk.Offset3D { x = 0, y = 0, z = 0 },
+      imageExtent = vk.Extent3D {
+        width = texture.width,
+        height = texture.height,
+        depth = 1,
+      },
+    }
   
-  region := vk.BufferImageCopy {
-    bufferOffset = 0,
-    bufferRowLength = 0,
-    bufferImageHeight = 0,
-    imageSubresource = vk.ImageSubresourceLayers {
-      aspectMask = { .COLOR },
-      mipLevel = 0,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-    // imageOffset = vk.Offset3D { x = 0, y = 0, z = 0 },
-    imageExtent = vk.Extent3D {
-      width = width,
-      height = height,
-      depth = 1,
-    },
+    vk.CmdCopyBufferToImage(ctx.st_command_buffer, staging.buffer, texture.image, .TRANSFER_DST_OPTIMAL, 1, &region)
+
+    _end_single_time_commands(ctx) or_return
   }
 
-  vk.CmdCopyBufferToImage(ctx.st_command_buffer, buffer, image, .TRANSFER_DST_OPTIMAL, 1, &region)
-
-  _end_single_time_commands(ctx) or_return
+  // Transition Image Layout
+  target_layout: vk.ImageLayout
+  switch texture.intended_usage {
+    case .ShaderReadOnly:
+      target_layout = .SHADER_READ_ONLY_OPTIMAL
+  }
+  transition_image_layout(ctx, texture.image, texture.format, .TRANSFER_DST_OPTIMAL, target_layout) or_return
 
   return .Success
 }
 
-load_image_sampler :: proc(ctx: ^Context, tex_width: i32, tex_height: i32, tex_channels: i32, image_usage: ImageSamplerUsage,
-  pixels: [^]u8) -> (handle: ResourceHandle, err: Error) {
-
-  handle = auto_cast _create_resource(&ctx.resource_manager, .Texture) or_return
-  texture : ^Texture = auto_cast get_resource(&ctx.resource_manager, handle) or_return
+create_texture :: proc(using ctx: ^Context, tex_width: i32, tex_height: i32, tex_channels: i32,
+  image_usage: ImageUsage) -> (handle: TextureResourceHandle, err: Error) {
+  // Create the resource
+  handle = auto_cast _create_resource(&resource_manager, .Texture) or_return
+  texture: ^Texture = auto_cast _get_resource(&resource_manager, auto_cast handle) or_return
   
   // image_sampler->resource_uid = p_vkrs->resource_uid_counter++; // TODO
   texture.sampler_usage = image_usage
   texture.width = auto_cast tex_width
   texture.height = auto_cast tex_height
   texture.size = auto_cast (tex_width * tex_height * 4) // TODO
+  texture.format = swap_chain.format.format
+  texture.intended_usage = image_usage
 
-  // Copy to buffer
-  staging_buffer: vk.Buffer
-  staging_buffer_memory: vk.DeviceMemory
-
-  // VkBufferCreateInfo bufferInfo = {};
-  // bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  // bufferInfo.size = image_sampler->size;
-  // bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-  // bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-  buffer_info := vk.BufferCreateInfo{
-    sType = .BUFFER_CREATE_INFO,
-    size = auto_cast texture.size,
-    usage = { .TRANSFER_SRC },
-    sharingMode = .EXCLUSIVE,
-  }
-
-  // res = vkCreateBuffer(p_vkrs->device, &bufferInfo, NULL, &stagingBuffer);
-  // VK_CHECK(res, "vkCreateBuffer");
-  vkres := vk.CreateBuffer(ctx.device, &buffer_info, nil, &staging_buffer)
-  if vkres != .SUCCESS {
-    fmt.eprintln("vkCreateBuffer failed:", vkres)
-    err = .NotYetDetailed
-    return
-  }
-
-  mem_requirements: vk.MemoryRequirements
-  vk.GetBufferMemoryRequirements(ctx.device, staging_buffer, &mem_requirements)
-
-  // VkMemoryAllocateInfo allocInfo = {};
-  // allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  // allocInfo.allocationSize = memRequirements.size;
-  // bool pass = mvk_get_properties_memory_type_index(
-  //     p_vkrs, memRequirements.memoryTypeBits,
-  //     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &allocInfo.memoryTypeIndex);
-  // MCassert(pass, "No mappable, coherent memory");
-  alloc_info := vk.MemoryAllocateInfo{
-    sType = .MEMORY_ALLOCATE_INFO,
-    allocationSize = mem_requirements.size,
-  }
-  alloc_info.memoryTypeIndex = find_memory_type(ctx, mem_requirements.memoryTypeBits, { .HOST_VISIBLE, .HOST_COHERENT })
-
-  vkres = vk.AllocateMemory(ctx.device, &alloc_info, nil, &staging_buffer_memory)
-  if vkres != .SUCCESS {
-    fmt.eprintln("vkAllocateMemory failed:", vkres)
-    err = .NotYetDetailed
-    return
-  }
-
-  vkres = vk.BindBufferMemory(ctx.device, staging_buffer, staging_buffer_memory, 0)
-  if vkres != .SUCCESS {
-    fmt.eprintln("vkBindBufferMemory failed:", vkres)
-    err = .NotYetDetailed
-    return
-  }
-
-  data: rawptr
-  vkres = vk.MapMemory(ctx.device, staging_buffer_memory, 0, mem_requirements.size, nil, &data)
-  if vkres != .SUCCESS {
-    fmt.eprintln("vkMapMemory failed:", vkres)
-    err = .NotYetDetailed
-    return
-  }
-  mem.copy(data, pixels, auto_cast texture.size)
-  vk.UnmapMemory(ctx.device, staging_buffer_memory)
-
-  // Create Image
-  vk_image_usage_flags: vk.ImageUsageFlags
-  switch image_usage {
-    case .ReadOnly:
-      vk_image_usage_flags = nil
-      texture.format = ctx.swap_chain.format.format // TODO ?? Not sure what this should be
-    case .RenderTarget:
-      fmt.println("TODO: RenderTarget")
-      err = .NotYetImplemented
-      return
-      // vk_image_usage_flags = { .COLOR_ATTACHMENT }
-      // texture.format = ctx.swap_chain.format.format
-  }
-
-  image_info := vk.ImageCreateInfo {
+  // Create the image
+  image_create_info := vk.ImageCreateInfo {
     sType = .IMAGE_CREATE_INFO,
     imageType = .D2,
     extent = vk.Extent3D {
@@ -539,53 +535,39 @@ load_image_sampler :: proc(ctx: ^Context, tex_width: i32, tex_height: i32, tex_c
     format = texture.format,
     tiling = .OPTIMAL,
     initialLayout = .UNDEFINED,
-    usage = vk_image_usage_flags | { .TRANSFER_DST, .SAMPLED },
-    sharingMode = .EXCLUSIVE,
-    samples = { ._1 },
-    flags = nil,
+    samples = {._1},
+  }
+  switch image_usage {
+    case .ShaderReadOnly:
+      image_create_info.usage = { .SAMPLED, .TRANSFER_DST }
+      texture.current_layout = .UNDEFINED
+    // case .ColorAttachment:
+    //   image_create_info.usage = { .COLOR_ATTACHMENT }
+    //   image_create_info.initialLayout = .UNDEFINED
+    // case .DepthStencilAttachment:
+    //   image_create_info.usage = { .DEPTH_STENCIL_ATTACHMENT }
+    //   image_create_info.initialLayout = .UNDEFINED
+    // case .RenderTarget:
+    //   image_create_info.usage = { .COLOR_ATTACHMENT }
+    //   image_create_info.initialLayout = .UNDEFINED
+    // case .Present_KHR:
+    //   image_create_info.usage = { .PRESENT_SRC_KHR }
+    //   image_create_info.initialLayout = .UNDEFINED
   }
 
-  vkres = vk.CreateImage(ctx.device, &image_info, nil, &texture.image)
+  // Allocate memory for the image
+  alloc_create_info := vma.AllocationCreateInfo {
+    usage = .AUTO_PREFER_DEVICE,
+    flags = {.DEDICATED_MEMORY},
+    priority = 1.0,
+  }
+
+  vkres := vma.CreateImage(ctx.vma_allocator, &image_create_info, &alloc_create_info, &texture.image, &texture.allocation, nil)
   if vkres != .SUCCESS {
-    fmt.eprintln("vkCreateImage failed:", vkres)
+    fmt.eprintln("vma.CreateImage failed:", vkres)
     err = .NotYetDetailed
     return
   }
-  
-  // Memory
-  vk.GetImageMemoryRequirements(ctx.device, texture.image, &mem_requirements)
-  alloc_info = vk.MemoryAllocateInfo{
-    sType = .MEMORY_ALLOCATE_INFO,
-    allocationSize = mem_requirements.size,
-  }
-  alloc_info.memoryTypeIndex = find_memory_type(ctx, mem_requirements.memoryTypeBits, { .DEVICE_LOCAL })
-
-  vkres = vk.AllocateMemory(ctx.device, &alloc_info, nil, &texture.image_memory)
-  if vkres != .SUCCESS {
-    fmt.eprintln("vkAllocateMemory failed:", vkres)
-    err = .NotYetDetailed
-    return
-  }
-  
-  vkres = vk.BindImageMemory(ctx.device, texture.image, texture.image_memory, 0)
-  if vkres != .SUCCESS {
-    fmt.eprintln("vkBindImageMemory failed:", vkres)
-    err = .NotYetDetailed
-    return
-  }
-
-  // Transition Image Layout
-  transition_image_layout(ctx, texture.image, texture.format, .UNDEFINED, .TRANSFER_DST_OPTIMAL) or_return
-  
-  // Copy Buffer to Image
-  copy_buffer_to_image(ctx, staging_buffer, texture.image, auto_cast tex_width, auto_cast tex_height) or_return
-  
-  // Transition Image Layout (again)
-  transition_image_layout(ctx, texture.image, texture.format, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL) or_return
-  
-  // Destroy staging resources
-  vk.DestroyBuffer(ctx.device, staging_buffer, nil)
-  vk.FreeMemory(ctx.device, staging_buffer_memory, nil)
 
   // Image View
   view_info := vk.ImageViewCreateInfo {
@@ -634,72 +616,72 @@ load_image_sampler :: proc(ctx: ^Context, tex_width: i32, tex_height: i32, tex_c
 
   // } break;
   // }
-  switch image_usage {
-    case .ReadOnly:
-      texture.framebuffer = auto_cast 0
-    case .RenderTarget:
-      fmt.eprintln("RenderTarget2D/3D not implemented")
-      err = .NotYetImplemented
-      return
-    // case .RenderTarget2D:
-    //   // Create Framebuffer
-    //   attachments := [1]vk.ImageView { texture.sampler_usage }
+  // switch image_usage {
+  //   case .ShaderReadOnly:
+  //     texture.framebuffer = auto_cast 0
+  //   case .RenderTarget:
+  //     fmt.eprintln("RenderTarget2D/3D not implemented")
+  //     err = .NotYetImplemented
+  //     return
+  //   // case .RenderTarget2D:
+  //   //   // Create Framebuffer
+  //   //   attachments := [1]vk.ImageView { texture.sampler_usage }
 
-    //   framebuffer_create_info := vk.FramebufferCreateInfo {
-    //     sType = .FRAMEBUFFER_CREATE_INFO,
-    //     renderPass = ctx.offscreen_render_pass_2d,
-    //     attachmentCount = len(attachments),
-    //     pAttachments = &attachments[0],
-    //     width = tex_width,
-    //     height = tex_height,
-    //     layers = 1,
-    //   }
+  //   //   framebuffer_create_info := vk.FramebufferCreateInfo {
+  //   //     sType = .FRAMEBUFFER_CREATE_INFO,
+  //   //     renderPass = ctx.offscreen_render_pass_2d,
+  //   //     attachmentCount = len(attachments),
+  //   //     pAttachments = &attachments[0],
+  //   //     width = tex_width,
+  //   //     height = tex_height,
+  //   //     layers = 1,
+  //   //   }
 
-    //   vkres = vk.CreateFramebuffer(ctx.device, &framebuffer_create_info, nil, &texture.framebuffer)
-    //   if vkres != .SUCCESS {
-    //     fmt.eprintln("vkCreateFramebuffer failed:", vkres)
-    //     err = .NotYetDetailed
-    //     return
-    //   }
-    //   // case MVK_IMAGE_USAGE_RENDER_TARGET_3D: {
-    //   //   // printf("MVK_IMAGE_USAGE_RENDER_TARGET_3D\n");
-    //   //   // Create Framebuffer
-    //   //   VkImageView attachments[2] = {image_sampler->view, p_vkrs->depth_buffer.view};
+  //   //   vkres = vk.CreateFramebuffer(ctx.device, &framebuffer_create_info, nil, &texture.framebuffer)
+  //   //   if vkres != .SUCCESS {
+  //   //     fmt.eprintln("vkCreateFramebuffer failed:", vkres)
+  //   //     err = .NotYetDetailed
+  //   //     return
+  //   //   }
+  //   //   // case MVK_IMAGE_USAGE_RENDER_TARGET_3D: {
+  //   //   //   // printf("MVK_IMAGE_USAGE_RENDER_TARGET_3D\n");
+  //   //   //   // Create Framebuffer
+  //   //   //   VkImageView attachments[2] = {image_sampler->view, p_vkrs->depth_buffer.view};
     
-    //   //   VkFramebufferCreateInfo framebuffer_create_info = {};
-    //   //   framebuffer_create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    //   //   framebuffer_create_info.pNext = NULL;
-    //   //   framebuffer_create_info.renderPass = p_vkrs->offscreen_render_pass_3d;
-    //   //   framebuffer_create_info.attachmentCount = 2;
-    //   //   framebuffer_create_info.pAttachments = attachments;
-    //   //   framebuffer_create_info.width = texWidth;
-    //   //   framebuffer_create_info.height = texHeight;
-    //   //   framebuffer_create_info.layers = 1;
+  //   //   //   VkFramebufferCreateInfo framebuffer_create_info = {};
+  //   //   //   framebuffer_create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+  //   //   //   framebuffer_create_info.pNext = NULL;
+  //   //   //   framebuffer_create_info.renderPass = p_vkrs->offscreen_render_pass_3d;
+  //   //   //   framebuffer_create_info.attachmentCount = 2;
+  //   //   //   framebuffer_create_info.pAttachments = attachments;
+  //   //   //   framebuffer_create_info.width = texWidth;
+  //   //   //   framebuffer_create_info.height = texHeight;
+  //   //   //   framebuffer_create_info.layers = 1;
     
-    //   //   res = vkCreateFramebuffer(p_vkrs->device, &framebuffer_create_info, NULL, &image_sampler->framebuffer);
-    //   //   VK_CHECK(res, "vkCreateFramebuffer");
-    //   // } break;
-    // case .RenderTarget3D:
-    //   // Create Framebuffer
-    //   attachments := [2]vk.ImageView { texture.sampler_usage, ctx.depth_buffer.view }
+  //   //   //   res = vkCreateFramebuffer(p_vkrs->device, &framebuffer_create_info, NULL, &image_sampler->framebuffer);
+  //   //   //   VK_CHECK(res, "vkCreateFramebuffer");
+  //   //   // } break;
+  //   // case .RenderTarget3D:
+  //   //   // Create Framebuffer
+  //   //   attachments := [2]vk.ImageView { texture.sampler_usage, ctx.depth_buffer.view }
 
-    //   framebuffer_create_info = vk.FramebufferCreateInfo {
-    //     sType = .FRAMEBUFFER_CREATE_INFO,
-    //     renderPass = ctx.offscreen_render_pass_3d,
-    //     attachmentCount = len(attachments),
-    //     pAttachments = &attachments[0],
-    //     width = tex_width,
-    //     height = tex_height,
-    //     layers = 1,
-    //   }
+  //   //   framebuffer_create_info = vk.FramebufferCreateInfo {
+  //   //     sType = .FRAMEBUFFER_CREATE_INFO,
+  //   //     renderPass = ctx.offscreen_render_pass_3d,
+  //   //     attachmentCount = len(attachments),
+  //   //     pAttachments = &attachments[0],
+  //   //     width = tex_width,
+  //   //     height = tex_height,
+  //   //     layers = 1,
+  //   //   }
 
-    //   vkres = vk.CreateFramebuffer(ctx.device, &framebuffer_create_info, nil, &texture.framebuffer)
-    //   if vkres != .SUCCESS {
-    //     fmt.eprintln("vkCreateFramebuffer failed:", vkres)
-    //     err = .NotYetDetailed
-    //     return
-    //   }
-  }
+  //   //   vkres = vk.CreateFramebuffer(ctx.device, &framebuffer_create_info, nil, &texture.framebuffer)
+  //   //   if vkres != .SUCCESS {
+  //   //     fmt.eprintln("vkCreateFramebuffer failed:", vkres)
+  //   //     err = .NotYetDetailed
+  //   //     return
+  //   //   }
+  // }
 
 
   // // Sampler
@@ -756,7 +738,13 @@ STBI_grey_alpha :: 2
 STBI_rgb :: 3
 STBI_rgb_alpha :: 4
 
-load_texture_from_file :: proc(ctx: ^Context, filepath: cstring) -> (rh: ResourceHandle, err: Error) {
+/* Loads a texture from a file for use as an image sampler in a shader.
+ * The texture is loaded into a staging buffer, then copied to a device local
+ * buffer. The staging buffer is then freed.
+ * @param ctx The Violin Context
+ * @param filepath The path to the file to load
+ */
+load_texture_from_file :: proc(using ctx: ^Context, filepath: cstring) -> (rh: TextureResourceHandle, err: Error) {
   
   tex_width, tex_height, tex_channels: libc.int
   pixels := stbi.load(filepath, &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha)
@@ -766,13 +754,14 @@ load_texture_from_file :: proc(ctx: ^Context, filepath: cstring) -> (rh: Resourc
     return
   }
   
-  image_size := tex_width * tex_height * STBI_rgb_alpha
+  image_size: int = auto_cast (tex_width * tex_height * STBI_rgb_alpha)
   fmt.println(pixels)
   // fmt.println("width:", tex_width, "height:", tex_height, "channels:", tex_channels, "image_size:", image_size)
 
-  rh = load_image_sampler(ctx, tex_width, tex_height, tex_channels, .ReadOnly, pixels) or_return
+  rh = create_texture(ctx, tex_width, tex_height, tex_channels, .ShaderReadOnly) or_return
+  texture: ^Texture = auto_cast _get_resource(&resource_manager, auto_cast rh) or_return
 
-  // append_to_collection((void ***)&p_vkrs->textures.items, &p_vkrs->textures.alloc, &p_vkrs->textures.count, texture);
+  write_to_texture(ctx, rh, pixels, image_size) or_return
 
   stbi.image_free(pixels)
 
@@ -815,6 +804,7 @@ create_uniform_buffer :: proc(using ctx: ^Context, size_in_bytes: vk.DeviceSize,
 }
 
 // TODO -- allow/disable staging - test performance
+// TODO -- single-use-commands within processing of render command buffers. whats the deal
 write_to_buffer :: proc(using ctx: ^Context, rh: ResourceHandle, data: rawptr, size_in_bytes: int) -> Error {
   buffer: ^Buffer = auto_cast get_resource(&resource_manager, rh) or_return
 
@@ -849,6 +839,9 @@ write_to_buffer :: proc(using ctx: ^Context, rh: ResourceHandle, data: rawptr, s
     }
     defer vma.DestroyBuffer(vma_allocator, staging.buffer, staging.allocation)
 
+    // Copy data to the staging buffer
+    mem.copy(staging.allocation_info.pMappedData, data, size_in_bytes)
+
     // Copy buffers
     _begin_single_time_commands(ctx) or_return
 
@@ -869,7 +862,7 @@ create_vertex_buffer :: proc(using ctx: ^Context, vertex_data: rawptr, vertex_si
   vertex_count: int) -> (rh: VertexBufferResourceHandle, err: Error) {
   // Create the resource
   rh = auto_cast _create_resource(&ctx.resource_manager, .VertexBuffer) or_return
-  vertex_buffer: ^VertexBuffer = auto_cast get_resource_any(&ctx.resource_manager, auto_cast rh) or_return
+  vertex_buffer: ^VertexBuffer = auto_cast _get_resource(&ctx.resource_manager, auto_cast rh) or_return
 
   // Set
   vertex_buffer.vertex_count = vertex_count
@@ -931,7 +924,7 @@ create_vertex_buffer :: proc(using ctx: ^Context, vertex_data: rawptr, vertex_si
 create_index_buffer :: proc(using ctx: ^Context, indices: ^u16, index_count: int) -> (rh:IndexBufferResourceHandle, err: Error) {
   // Create the resource
   rh = auto_cast _create_resource(&ctx.resource_manager, .IndexBuffer) or_return
-  index_buffer: ^IndexBuffer = auto_cast get_resource_any(&ctx.resource_manager, auto_cast rh) or_return
+  index_buffer: ^IndexBuffer = auto_cast _get_resource(&ctx.resource_manager, auto_cast rh) or_return
 
   // Set
   index_buffer.index_count = index_count
@@ -1114,128 +1107,151 @@ create_render_program :: proc(ctx: ^Context, info: ^RenderProgramCreateInfo) -> 
 // VkResult res;
 
 load_font :: proc(using ctx: ^Context, ttf_filepath: string, font_height: f32) -> (fh: FontResourceHandle, err: Error) {
-// // Font is a common resource -- check font cache for existing -- TODO?
-// char *font_name;
-// {
-// int index_of_last_slash = -1;
-// for (int i = 0;; i++) {
-// if (filepath[i] == '\0') {
-// printf("INVALID FORMAT filepath='%s'\n", filepath);
-// return VK_ERROR_UNKNOWN;
-// }
-// if (filepath[i] == '.') {
-// int si = index_of_last_slash >= 0 ? (index_of_last_slash + 1) : 0;
-// font_name = (char *)malloc(sizeof(char) * (i - si + 1));
-// strncpy(font_name, filepath + si, i - si);
-// font_name[i - si] = '\0';
-// break;
-// }
-// else if (filepath[i] == '\\' || filepath[i] == '/') {
-// index_of_last_slash = i;
-// }
-// }
+// // // Font is a common resource -- check font cache for existing -- TODO?
+// // char *font_name;
+// // {
+// // int index_of_last_slash = -1;
+// // for (int i = 0;; i++) {
+// // if (filepath[i] == '\0') {
+// // printf("INVALID FORMAT filepath='%s'\n", filepath);
+// // return VK_ERROR_UNKNOWN;
+// // }
+// // if (filepath[i] == '.') {
+// // int si = index_of_last_slash >= 0 ? (index_of_last_slash + 1) : 0;
+// // font_name = (char *)malloc(sizeof(char) * (i - si + 1));
+// // strncpy(font_name, filepath + si, i - si);
+// // font_name[i - si] = '\0';
+// // break;
+// // }
+// // else if (filepath[i] == '\\' || filepath[i] == '/') {
+// // index_of_last_slash = i;
+// // }
+// // }
 
-// for (int i = 0; i < p_vkrs->loaded_fonts.count; ++i) {
-// if (p_vkrs->loaded_fonts.fonts[i]->height == font_height &&
-// !strcmp(p_vkrs->loaded_fonts.fonts[i]->name, font_name)) {
-// *p_resource = p_vkrs->loaded_fonts.fonts[i];
+// // for (int i = 0; i < p_vkrs->loaded_fonts.count; ++i) {
+// // if (p_vkrs->loaded_fonts.fonts[i]->height == font_height &&
+// // !strcmp(p_vkrs->loaded_fonts.fonts[i]->name, font_name)) {
+// // *p_resource = p_vkrs->loaded_fonts.fonts[i];
 
-// printf("using cached font texture> name:%s height:%.2f resource_uid:%u\n", font_name, font_height,
-// (*p_resource)->texture->resource_uid);
-// free(font_name);
+// // printf("using cached font texture> name:%s height:%.2f resource_uid:%u\n", font_name, font_height,
+// // (*p_resource)->texture->resource_uid);
+// // free(font_name);
 
-// return VK_SUCCESS;
-// }
-// }
-// }
+// // return VK_SUCCESS;
+// // }
+// // }
+// // }
 
-// Load font
-// stbi_uc ttf_buffer[1 << 20];
-// fread(ttf_buffer, 1, 1 << 20, fopen(filepath, "rb"));
-  // ttf_buffer[]
-  file, oerr := os.open(ttf_filepath)
+// // Load font
+// // stbi_uc ttf_buffer[1 << 20];
+// // fread(ttf_buffer, 1, 1 << 20, fopen(filepath, "rb"));
+//   // ttf_buffer[]
+//   file, oerr := os.open(ttf_filepath)
 
 
-  errno: os.Errno
-  h_ttf: os.Handle
+//   errno: os.Errno
+//   h_ttf: os.Handle
 
-  // Open the source file
-  h_ttf, errno = os.open(ttf_filepath)
-  if errno != os.ERROR_NONE {
-    fmt.printf("Error File I/O: couldn't open font path='%s' set full path accordingly\n", ttf_filepath)
-    err = .NotYetDetailed
-    return
-  }
-  defer os.close(h_ttf)
+//   // Open the source file
+//   h_ttf, errno = os.open(ttf_filepath)
+//   if errno != os.ERROR_NONE {
+//     fmt.printf("Error File I/O: couldn't open font path='%s' set full path accordingly\n", ttf_filepath)
+//     err = .NotYetDetailed
+//     return
+//   }
+//   defer os.close(h_ttf)
 
-  // read_success: bool
-  data, read_success := os.read_entire_file_from_handle(h_ttf)
-  if !read_success {
-    fmt.println("Could not read full ttf font file:", ttf_filepath)
-    err = .NotYetDetailed
-    return
-  }
-  defer delete(data)
+//   // read_success: bool
+//   ttf_buffer, read_success := os.read_entire_file_from_handle(h_ttf)
+//   if !read_success {
+//     fmt.println("Could not read full ttf font file:", ttf_filepath)
+//     err = .NotYetDetailed
+//     return
+//   }
+//   defer delete(ttf_buffer)
 
-// const int texWidth = 256, texHeight = 256, texChannels = 4;
-// stbi_uc temp_bitmap[texWidth * texHeight];
-// stbtt_bakedchar *cdata = (stbtt_bakedchar *)malloc(sizeof(stbtt_bakedchar) * 96); // ASCII 32..126 is 95 glyphs
-// stbtt_BakeFontBitmap(ttf_buffer, 0, font_height, temp_bitmap, texWidth, texHeight, 32, 96,
-//   cdata); // no guarantee this fits!
+// // const int texWidth = 256, texHeight = 256, texChannels = 4;
+// // stbi_uc temp_bitmap[texWidth * texHeight];
+// // stbtt_bakedchar *cdata = (stbtt_bakedchar *)malloc(sizeof(stbtt_bakedchar) * 96); // ASCII 32..126 is 95 glyphs
+// // stbtt_BakeFontBitmap(ttf_buffer, 0, font_height, temp_bitmap, texWidth, texHeight, 32, 96,
+// //   cdata); // no guarantee this fits!
+//   tex_width :: 256
+//   tex_height :: 256
+//   tex_channels :: 4
+//   temp_bitmap: [^]u8 = auto_cast mem.alloc(size=tex_width * tex_height, allocator = context.temp_allocator)
+//   defer free(temp_bitmap)
+//   cdata: ^stbtt.bakedchar = auto_cast mem.alloc(size=96 * size_of(stbtt.bakedchar), allocator = context.temp_allocator)
+//   defer free(cdata)
 
-// // printf("garbagein: font_height:%f\n", font_height);
-// stbi_uc pixels[texWidth * texHeight * 4];
-// {
-// int p = 0;
-// for (int i = 0; i < texWidth * texHeight; ++i) {
-// pixels[p++] = temp_bitmap[i];
-// pixels[p++] = temp_bitmap[i];
-// pixels[p++] = temp_bitmap[i];
-// pixels[p++] = 255;
-// }
-// }
+//   stbtt.BakeFontBitmap(&ttf_buffer[0], 0, font_height, temp_bitmap, tex_width, tex_height, 32, 96, cdata)
 
-// mcr_texture_image *texture;
-// res = mvk_load_image_sampler(p_vkrs, texWidth, texHeight, texChannels, MVK_IMAGE_USAGE_READ_ONLY, pixels, &texture);
-// VK_CHECK(res, "mvk_load_image_sampler");
+// // // printf("garbagein: font_height:%f\n", font_height);
+// // stbi_uc pixels[texWidth * texHeight * 4];
+// // {
+// // int p = 0;
+// // for (int i = 0; i < texWidth * texHeight; ++i) {
+// // pixels[p++] = temp_bitmap[i];
+// // pixels[p++] = temp_bitmap[i];
+// // pixels[p++] = temp_bitmap[i];
+// // pixels[p++] = 255;
+// // }
+// // }
+//   pixels := make([]u8, tex_width * tex_height * 4)
+//   // auto_cast mem.alloc(size=tex_width * tex_height * 4, allocator = context.temp_allocator)
+//   // defer free(pixels)
+//   {
+//     p := 0
+//     for i := 0; i < tex_width * tex_height; i += 1 {
+//       pixels[p] = temp_bitmap[i]
+//       pixels[p + 1] = temp_bitmap[i]
+//       pixels[p + 2] = temp_bitmap[i]
+//       pixels[p + 3] = 255
+//       p += 4
+//     }
+//   }
 
-// append_to_collection((void ***)&p_vkrs->textures.items, &p_vkrs->textures.alloc, &p_vkrs->textures.count, texture);
+// // mcr_texture_image *texture;
+// // res = mvk_load_image_sampler(p_vkrs, texWidth, texHeight, texChannels, MVK_IMAGE_USAGE_READ_ONLY, pixels, &texture);
+// // VK_CHECK(res, "mvk_load_image_sampler");
+//   // rh := _create_resource(&ctx.resource_manager, .Texture, )
 
-// // Font is a common resource -- cache so multiple loads reference the same resource uid
-// {
-// mcr_font_resource *font = (mcr_font_resource *)malloc(sizeof(mcr_font_resource));
-// append_to_collection((void ***)&p_vkrs->loaded_fonts.fonts, &p_vkrs->loaded_fonts.capacity,
-//     &p_vkrs->loaded_fonts.count, font);
+// // append_to_collection((void ***)&p_vkrs->textures.items, &p_vkrs->textures.alloc, &p_vkrs->textures.count, texture);
 
-// font->name = font_name;
-// font->height = font_height;
-// font->texture = texture;
-// font->char_data = cdata;
-// {
-// float lowest = 500;
-// for (int ci = 0; ci < 96; ++ci) {
-// stbtt_aligned_quad q;
+// // // Font is a common resource -- cache so multiple loads reference the same resource uid
+// // {
+// // mcr_font_resource *font = (mcr_font_resource *)malloc(sizeof(mcr_font_resource));
+// // append_to_collection((void ***)&p_vkrs->loaded_fonts.fonts, &p_vkrs->loaded_fonts.capacity,
+// //     &p_vkrs->loaded_fonts.count, font);
 
-// // printf("garbagein: %i %i %f %f %i\n", (int)font_image->width, (int)font_image->height, align_x, align_y,
-// // letter
-// // - 32);
-// float ax = 100, ay = 300;
-// stbtt_GetBakedQuad(cdata, (int)texWidth, (int)texHeight, ci, &ax, &ay, &q, 1);
-// if (q.y0 < lowest)
-// lowest = q.y0;
-// // printf("baked_quad: s0=%.2f s1==%.2f t0=%.2f t1=%.2f x0=%.2f x1=%.2f y0=%.2f y1=%.2f lowest=%.3f\n", q.s0,
-// // q.s1,
-// //        q.t0, q.t1, q.x0, q.x1, q.y0, q.y1, lowest);
-// }
-// font->draw_vertical_offset = 300 - lowest;
-// }
+// // font->name = font_name;
+// // font->height = font_height;
+// // font->texture = texture;
+// // font->char_data = cdata;
+// // {
+// // float lowest = 500;
+// // for (int ci = 0; ci < 96; ++ci) {
+// // stbtt_aligned_quad q;
 
-// *p_resource = font;
-// printf("generated font resource> name:%s height:%.2f resource_uid:%u\n", font_name, font_height,
-// font->texture->resource_uid);
-// }
+// // // printf("garbagein: %i %i %f %f %i\n", (int)font_image->width, (int)font_image->height, align_x, align_y,
+// // // letter
+// // // - 32);
+// // float ax = 100, ay = 300;
+// // stbtt_GetBakedQuad(cdata, (int)texWidth, (int)texHeight, ci, &ax, &ay, &q, 1);
+// // if (q.y0 < lowest)
+// // lowest = q.y0;
+// // // printf("baked_quad: s0=%.2f s1==%.2f t0=%.2f t1=%.2f x0=%.2f x1=%.2f y0=%.2f y1=%.2f lowest=%.3f\n", q.s0,
+// // // q.s1,
+// // //        q.t0, q.t1, q.x0, q.x1, q.y0, q.y1, lowest);
+// // }
+// // font->draw_vertical_offset = 300 - lowest;
+// // }
 
-// return res;
+// // *p_resource = font;
+// // printf("generated font resource> name:%s height:%.2f resource_uid:%u\n", font_name, font_height,
+// // font->texture->resource_uid);
+// // }
+
+// // return res;
   fmt.println("load_font> NotYetImplemented")
   err = .NotYetImplemented
   return
