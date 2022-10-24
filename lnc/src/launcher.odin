@@ -69,6 +69,7 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
   // }
   // defer vi.destroy_resource(ctx, rpass2d)
 
+  // Resources
   handle_2d: vi.StampRenderResourceHandle
   handle_2d, err = vi.init_stamp_batch_renderer(ctx, { .IsPresent }) // .HasPreviousColorPass,
   if err != .Success {
@@ -82,13 +83,11 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
   if err != .Success do return .NotYetDetailed
   defer vi.destroy_resource(ctx, parth)
  
-  // font: vi.FontResourceHandle
-  // font, err = vi.load_font(ctx, "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf", 16)
-  // if err != .Success {
-  //   fmt.println("load_font error")
-  //   return .NotYetDetailed
-  // }
-  // Resources
+  font: vi.FontResourceHandle
+  font, err = vi.load_font(ctx, "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf", 16)
+  defer vi.destroy_resource(ctx, font)
+  if err != .Success do return .NotYetDetailed
+  
   // rd2: vi.RenderData
   // rp2: vi.RenderProgram
   // rd2, rp2, err = load_textured_rect(ctx, rpass2d)
@@ -207,9 +206,9 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     sq = mu.Rect{200, 200, 100, 300}
     co = mu.Color{255, 255, 15, 255}
     if vi.stamp_colored_rect(rctx, handle_2d, auto_cast &sq, auto_cast &co) != .Success do return .NotYetDetailed
-    sq = mu.Rect{280, 60, 420, 410}
-    // // co = mu.Color{255, 255, 15, 255}
-    if vi.stamp_textured_rect(rctx, handle_2d, parth, auto_cast &sq) != .Success do return .NotYetDetailed
+    sq = mu.Rect{280, 60, 420, 210}
+    co = mu.Color{15, 255, 255, 125}
+    if vi.stamp_textured_rect(rctx, handle_2d, parth, auto_cast &sq, auto_cast &co) != .Success do return .NotYetDetailed
 
     // vi.stamp_text(rctx, handle_2d,  "Hello World", mu.Rect{100, 100, 300, 200}, mu.Color{255, 255, 255, 255}, 0.0, 0.0, 0.0, 0.0)
     // cmd : ^mu.Command

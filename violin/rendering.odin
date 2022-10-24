@@ -194,7 +194,7 @@ end_present :: proc(using rctx: ^RenderContext) -> Error {
     case .StampRenderPass:
       // fmt.println("end_present: StampRenderPass -- rctx.followup_render_pass:", rctx.followup_render_pass)
       // End the previous Render Pass
-      _begin_render_pass(rctx, rctx.followup_render_pass) or_return
+      if rctx.followup_render_pass != 0 do _begin_render_pass(rctx, rctx.followup_render_pass) or_return
       rctx.followup_render_pass = auto_cast 0
       fallthrough
     case .RenderPass:

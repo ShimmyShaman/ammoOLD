@@ -858,7 +858,7 @@ create_image_views :: proc(using ctx: ^Context) {
 
 create_graphics_pipeline :: proc(ctx: ^Context, pipeline_config: ^PipelineCreateConfig, vertex_binding_desc: ^vk.VertexInputBindingDescription,
   vertex_attributes: []vk.VertexInputAttributeDescription, descriptor_layout: [^]vk.DescriptorSetLayout) -> (pipeline: Pipeline, err: Error) {
-  fmt.println("Creating Graphics Pipeline...", pipeline_config.render_pass)
+  // fmt.println("Creating Graphics Pipeline...", pipeline_config.render_pass)
   // Create Shader Modules
   vs_code := compile_shader(pipeline_config.vertex_shader_filepath, .Vertex);
   fs_code := compile_shader(pipeline_config.fragment_shader_filepath, .Fragment);

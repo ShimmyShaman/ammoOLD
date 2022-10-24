@@ -44,11 +44,21 @@ ResourceKind :: enum {
   StampRenderResource,
   VertexBuffer,
   IndexBuffer,
+  Font,
 }
 
 Resource :: struct {
   kind: ResourceKind,
-  data: union { Buffer, Texture, DepthBuffer, RenderPass, StampRenderResource, VertexBuffer, IndexBuffer },
+  data: union {
+    Buffer,
+    Texture,
+    DepthBuffer,
+    RenderPass,
+    StampRenderResource,
+    VertexBuffer,
+    IndexBuffer,
+    Font,
+  },
 }
 
 ImageUsage :: enum {
@@ -114,10 +124,10 @@ RenderPass :: struct {
 }
 
 StampRenderResource :: struct {
-  clear_render_pass, draw_render_pass, present_render_pass: RenderPassResourceHandle,
-  colored_rect_render_program: RenderProgram,
-  textured_rect_render_program: RenderProgram,
-  rect_vertex_buffer: VertexBufferResourceHandle,
+  // clear_render_pass, draw_render_pass, present_render_pass: RenderPassResourceHandle,
+  render_pass: RenderPassResourceHandle,
+  colored_rect_render_program, textured_rect_render_program: RenderProgram,
+  colored_rect_vertex_buffer, textured_rect_vertex_buffer: VertexBufferResourceHandle,
   rect_index_buffer: IndexBufferResourceHandle,
 
   uniform_buffer: StampUniformBuffer,
@@ -128,6 +138,14 @@ StampUniformBuffer :: struct {
   utilization: vk.DeviceSize,
   capacity: vk.DeviceSize,
   device_min_block_alignment: vk.DeviceSize,
+}
+
+Font :: struct {
+  name: string,
+  height: f32,
+  draw_vertical_offset: f32,
+  texture: TextureResourceHandle,
+  char_data: [^]stbtt.bakedchar,
 }
 
 // TODO -- this is a bit of a hack, but it works for now
@@ -172,12 +190,14 @@ _init_resource_manager :: proc(using rm: ^ResourceManager) -> Error {
   return .Success
 }
 
+// TODO -- ? remove size ? not used at all
 _create_resource :: proc(using rm: ^ResourceManager, resource_kind: ResourceKind, size: u32 = 0) -> (rh: ResourceHandle, err: Error) {
   sync.lock(&rm._mutex)
   defer sync.unlock(&rm._mutex)
 
   switch resource_kind {
-    case .Texture, .Buffer, .DepthBuffer, .RenderPass, .StampRenderResource, .VertexBuffer, .IndexBuffer:
+    case .Texture, .Buffer, .DepthBuffer, .RenderPass, .StampRenderResource, .VertexBuffer, .IndexBuffer,
+      .Font:
       rh = resource_index
       resource_index += 1
       res : ^Resource = auto_cast mem.alloc(size_of(Resource))
@@ -194,16 +214,17 @@ _create_resource :: proc(using rm: ^ResourceManager, resource_kind: ResourceKind
 
 _resource_manager_report :: proc(using rm: ^ResourceManager) {
   fmt.println("Resource Manager Report:")
-  fmt.println("  Resource Manager:", rm)
+  // fmt.println("  Resource Manager:", rm)
   fmt.println("  Resource Count: ", len(resource_map))
   fmt.println("  Resource Index: ", resource_index)
 }
 
-_get_resource :: proc(using rm: ^ResourceManager, rh: ResourceHandle) -> (ptr: rawptr, err: Error) {
+_get_resource :: proc(using rm: ^ResourceManager, rh: ResourceHandle, loc := #caller_location) -> (ptr: rawptr, err: Error) {
   res := resource_map[rh]
   if res == nil {
     err = .ResourceNotFound
     fmt.eprintln("Could not find resource for handle:", rh)
+    fmt.eprintln("--Caller:", loc)
     _resource_manager_report(rm)
     return
   }
@@ -212,8 +233,8 @@ _get_resource :: proc(using rm: ^ResourceManager, rh: ResourceHandle) -> (ptr: r
   return
 }
 
-get_resource_render_pass :: proc(using rm: ^ResourceManager, rh: RenderPassResourceHandle) -> (ptr: ^RenderPass, err: Error) {
-  ptr = auto_cast _get_resource(rm, auto_cast rh) or_return
+get_resource_render_pass :: proc(using rm: ^ResourceManager, rh: RenderPassResourceHandle, loc := #caller_location) -> (ptr: ^RenderPass, err: Error) {
+  ptr = auto_cast _get_resource(rm, auto_cast rh, loc) or_return
   return
 }
 
@@ -270,6 +291,11 @@ destroy_resource_any :: proc(using ctx: ^Context, rh: ResourceHandle) -> Error {
       vb: ^VertexBuffer = auto_cast &res.data
       
       vma.DestroyBuffer(vma_allocator, vb.buffer, vb.allocation)
+    case .Font:
+      font: ^Font = auto_cast &res.data
+
+      destroy_resource(ctx, font.texture)
+      // TODO char_data
     case:
       fmt.println("Resource type not supported:", res.kind)
       return .NotYetDetailed
@@ -306,8 +332,12 @@ destroy_ui_render_resource :: proc(using ctx: ^Context, rh: StampRenderResourceH
   return destroy_resource_any(ctx, auto_cast rh)
 }
 
+destroy_font :: proc(using ctx: ^Context, rh: FontResourceHandle) -> Error {
+  return destroy_resource_any(ctx, auto_cast rh)
+}
+
 destroy_resource :: proc {destroy_resource_any, destroy_render_pass, destroy_texture, destroy_vertex_buffer, destroy_index_buffer,
-  destroy_ui_render_resource}
+  destroy_ui_render_resource, destroy_font}
 
 _resize_framebuffer_resources :: proc(using ctx: ^Context) -> Error {
 
@@ -1107,152 +1137,162 @@ create_render_program :: proc(ctx: ^Context, info: ^RenderProgramCreateInfo) -> 
 // VkResult res;
 
 load_font :: proc(using ctx: ^Context, ttf_filepath: string, font_height: f32) -> (fh: FontResourceHandle, err: Error) {
-// // // Font is a common resource -- check font cache for existing -- TODO?
-// // char *font_name;
-// // {
-// // int index_of_last_slash = -1;
-// // for (int i = 0;; i++) {
-// // if (filepath[i] == '\0') {
-// // printf("INVALID FORMAT filepath='%s'\n", filepath);
-// // return VK_ERROR_UNKNOWN;
-// // }
-// // if (filepath[i] == '.') {
-// // int si = index_of_last_slash >= 0 ? (index_of_last_slash + 1) : 0;
-// // font_name = (char *)malloc(sizeof(char) * (i - si + 1));
-// // strncpy(font_name, filepath + si, i - si);
-// // font_name[i - si] = '\0';
-// // break;
-// // }
-// // else if (filepath[i] == '\\' || filepath[i] == '/') {
-// // index_of_last_slash = i;
-// // }
-// // }
+// // Font is a common resource -- check font cache for existing -- TODO?
+// char *font_name;
+// {
+// int index_of_last_slash = -1;
+// for (int i = 0;; i++) {
+// if (filepath[i] == '\0') {
+// printf("INVALID FORMAT filepath='%s'\n", filepath);
+// return VK_ERROR_UNKNOWN;
+// }
+// if (filepath[i] == '.') {
+// int si = index_of_last_slash >= 0 ? (index_of_last_slash + 1) : 0;
+// font_name = (char *)malloc(sizeof(char) * (i - si + 1));
+// strncpy(font_name, filepath + si, i - si);
+// font_name[i - si] = '\0';
+// break;
+// }
+// else if (filepath[i] == '\\' || filepath[i] == '/') {
+// index_of_last_slash = i;
+// }
+// }
 
-// // for (int i = 0; i < p_vkrs->loaded_fonts.count; ++i) {
-// // if (p_vkrs->loaded_fonts.fonts[i]->height == font_height &&
-// // !strcmp(p_vkrs->loaded_fonts.fonts[i]->name, font_name)) {
-// // *p_resource = p_vkrs->loaded_fonts.fonts[i];
+// for (int i = 0; i < p_vkrs->loaded_fonts.count; ++i) {
+// if (p_vkrs->loaded_fonts.fonts[i]->height == font_height &&
+// !strcmp(p_vkrs->loaded_fonts.fonts[i]->name, font_name)) {
+// *p_resource = p_vkrs->loaded_fonts.fonts[i];
 
-// // printf("using cached font texture> name:%s height:%.2f resource_uid:%u\n", font_name, font_height,
-// // (*p_resource)->texture->resource_uid);
-// // free(font_name);
+// printf("using cached font texture> name:%s height:%.2f resource_uid:%u\n", font_name, font_height,
+// (*p_resource)->texture->resource_uid);
+// free(font_name);
 
-// // return VK_SUCCESS;
-// // }
-// // }
-// // }
+// return VK_SUCCESS;
+// }
+// }
+// }
 
-// // Load font
-// // stbi_uc ttf_buffer[1 << 20];
-// // fread(ttf_buffer, 1, 1 << 20, fopen(filepath, "rb"));
-//   // ttf_buffer[]
-//   file, oerr := os.open(ttf_filepath)
+// Load font
+// stbi_uc ttf_buffer[1 << 20];
+// fread(ttf_buffer, 1, 1 << 20, fopen(filepath, "rb"));
+  // ttf_buffer[]
+  file, oerr := os.open(ttf_filepath)
 
 
-//   errno: os.Errno
-//   h_ttf: os.Handle
+  errno: os.Errno
+  h_ttf: os.Handle
 
-//   // Open the source file
-//   h_ttf, errno = os.open(ttf_filepath)
-//   if errno != os.ERROR_NONE {
-//     fmt.printf("Error File I/O: couldn't open font path='%s' set full path accordingly\n", ttf_filepath)
-//     err = .NotYetDetailed
-//     return
-//   }
-//   defer os.close(h_ttf)
+  // Open the source file
+  h_ttf, errno = os.open(ttf_filepath)
+  if errno != os.ERROR_NONE {
+    fmt.printf("Error File I/O: couldn't open font path='%s' set full path accordingly\n", ttf_filepath)
+    err = .NotYetDetailed
+    return
+  }
+  defer os.close(h_ttf)
 
-//   // read_success: bool
-//   ttf_buffer, read_success := os.read_entire_file_from_handle(h_ttf)
-//   if !read_success {
-//     fmt.println("Could not read full ttf font file:", ttf_filepath)
-//     err = .NotYetDetailed
-//     return
-//   }
-//   defer delete(ttf_buffer)
+  // read_success: bool
+  ttf_buffer, read_success := os.read_entire_file_from_handle(h_ttf)
+  if !read_success {
+    fmt.println("Could not read full ttf font file:", ttf_filepath)
+    err = .NotYetDetailed
+    return
+  }
+  defer delete(ttf_buffer)
 
-// // const int texWidth = 256, texHeight = 256, texChannels = 4;
-// // stbi_uc temp_bitmap[texWidth * texHeight];
-// // stbtt_bakedchar *cdata = (stbtt_bakedchar *)malloc(sizeof(stbtt_bakedchar) * 96); // ASCII 32..126 is 95 glyphs
-// // stbtt_BakeFontBitmap(ttf_buffer, 0, font_height, temp_bitmap, texWidth, texHeight, 32, 96,
-// //   cdata); // no guarantee this fits!
-//   tex_width :: 256
-//   tex_height :: 256
-//   tex_channels :: 4
-//   temp_bitmap: [^]u8 = auto_cast mem.alloc(size=tex_width * tex_height, allocator = context.temp_allocator)
-//   defer free(temp_bitmap)
-//   cdata: ^stbtt.bakedchar = auto_cast mem.alloc(size=96 * size_of(stbtt.bakedchar), allocator = context.temp_allocator)
-//   defer free(cdata)
+  // Create the resource
+  fh = auto_cast _create_resource(&resource_manager, .Font) or_return
+  font: ^Font = auto_cast _get_resource(&resource_manager, auto_cast fh) or_return
+  font.texture = create_texture(ctx, tex_width, tex_height, tex_channels, .ShaderReadOnly) or_return
+  font.cdata = auto_cast mem.alloc(size=96 * size_of(stbtt.bakedchar), allocator = context.temp_allocator)
 
-//   stbtt.BakeFontBitmap(&ttf_buffer[0], 0, font_height, temp_bitmap, tex_width, tex_height, 32, 96, cdata)
+// const int texWidth = 256, texHeight = 256, texChannels = 4;
+// stbi_uc temp_bitmap[texWidth * texHeight];
+// stbtt_bakedchar *cdata = (stbtt_bakedchar *)malloc(sizeof(stbtt_bakedchar) * 96); // ASCII 32..126 is 95 glyphs
+// stbtt_BakeFontBitmap(ttf_buffer, 0, font_height, temp_bitmap, texWidth, texHeight, 32, 96,
+//   cdata); // no guarantee this fits!
+  tex_width :: 256
+  tex_height :: 256
+  tex_channels :: 4
+  temp_bitmap: [^]u8 = auto_cast mem.alloc(size=tex_width * tex_height, allocator = context.temp_allocator)
+  defer free(temp_bitmap)
 
-// // // printf("garbagein: font_height:%f\n", font_height);
-// // stbi_uc pixels[texWidth * texHeight * 4];
-// // {
-// // int p = 0;
-// // for (int i = 0; i < texWidth * texHeight; ++i) {
-// // pixels[p++] = temp_bitmap[i];
-// // pixels[p++] = temp_bitmap[i];
-// // pixels[p++] = temp_bitmap[i];
-// // pixels[p++] = 255;
-// // }
-// // }
-//   pixels := make([]u8, tex_width * tex_height * 4)
-//   // auto_cast mem.alloc(size=tex_width * tex_height * 4, allocator = context.temp_allocator)
-//   // defer free(pixels)
-//   {
-//     p := 0
-//     for i := 0; i < tex_width * tex_height; i += 1 {
-//       pixels[p] = temp_bitmap[i]
-//       pixels[p + 1] = temp_bitmap[i]
-//       pixels[p + 2] = temp_bitmap[i]
-//       pixels[p + 3] = 255
-//       p += 4
-//     }
-//   }
+  stbtt.BakeFontBitmap(&ttf_buffer[0], 0, font_height, temp_bitmap, tex_width, tex_height, 32, 96, cdata)
 
-// // mcr_texture_image *texture;
-// // res = mvk_load_image_sampler(p_vkrs, texWidth, texHeight, texChannels, MVK_IMAGE_USAGE_READ_ONLY, pixels, &texture);
-// // VK_CHECK(res, "mvk_load_image_sampler");
-//   // rh := _create_resource(&ctx.resource_manager, .Texture, )
+// // printf("garbagein: font_height:%f\n", font_height);
+// stbi_uc pixels[texWidth * texHeight * 4];
+// {
+// int p = 0;
+// for (int i = 0; i < texWidth * texHeight; ++i) {
+// pixels[p++] = temp_bitmap[i];
+// pixels[p++] = temp_bitmap[i];
+// pixels[p++] = temp_bitmap[i];
+// pixels[p++] = 255;
+// }
+// }
 
-// // append_to_collection((void ***)&p_vkrs->textures.items, &p_vkrs->textures.alloc, &p_vkrs->textures.count, texture);
+  // Copy the font data into the texture
+  pixels := make([^]u8, tex_width * tex_height * 4, context.temp_allocator)
+  defer free(pixels)
+  {
+    p := 0
+    for i := 0; i < tex_width * tex_height; i += 1 {
+      pixels[p] = temp_bitmap[i]
+      pixels[p + 1] = temp_bitmap[i]
+      pixels[p + 2] = temp_bitmap[i]
+      pixels[p + 3] = 255
+      p += 4
+    }
+  }
+  write_to_texture(ctx, font.texture, pixels, tex_width * tex_height * 4) or_return
 
-// // // Font is a common resource -- cache so multiple loads reference the same resource uid
-// // {
-// // mcr_font_resource *font = (mcr_font_resource *)malloc(sizeof(mcr_font_resource));
-// // append_to_collection((void ***)&p_vkrs->loaded_fonts.fonts, &p_vkrs->loaded_fonts.capacity,
-// //     &p_vkrs->loaded_fonts.count, font);
+  // 
 
-// // font->name = font_name;
-// // font->height = font_height;
-// // font->texture = texture;
-// // font->char_data = cdata;
-// // {
-// // float lowest = 500;
-// // for (int ci = 0; ci < 96; ++ci) {
-// // stbtt_aligned_quad q;
 
-// // // printf("garbagein: %i %i %f %f %i\n", (int)font_image->width, (int)font_image->height, align_x, align_y,
-// // // letter
-// // // - 32);
-// // float ax = 100, ay = 300;
-// // stbtt_GetBakedQuad(cdata, (int)texWidth, (int)texHeight, ci, &ax, &ay, &q, 1);
-// // if (q.y0 < lowest)
-// // lowest = q.y0;
-// // // printf("baked_quad: s0=%.2f s1==%.2f t0=%.2f t1=%.2f x0=%.2f x1=%.2f y0=%.2f y1=%.2f lowest=%.3f\n", q.s0,
-// // // q.s1,
-// // //        q.t0, q.t1, q.x0, q.x1, q.y0, q.y1, lowest);
-// // }
-// // font->draw_vertical_offset = 300 - lowest;
-// // }
 
-// // *p_resource = font;
-// // printf("generated font resource> name:%s height:%.2f resource_uid:%u\n", font_name, font_height,
-// // font->texture->resource_uid);
-// // }
+// mcr_texture_image *texture;
+// res = mvk_load_image_sampler(p_vkrs, texWidth, texHeight, texChannels, MVK_IMAGE_USAGE_READ_ONLY, pixels, &texture);
+// VK_CHECK(res, "mvk_load_image_sampler");
+  // rh := _create_resource(&ctx.resource_manager, .Texture, )
 
-// // return res;
-  fmt.println("load_font> NotYetImplemented")
-  err = .NotYetImplemented
+// append_to_collection((void ***)&p_vkrs->textures.items, &p_vkrs->textures.alloc, &p_vkrs->textures.count, texture);
+
+// // Font is a common resource -- cache so multiple loads reference the same resource uid
+// {
+// mcr_font_resource *font = (mcr_font_resource *)malloc(sizeof(mcr_font_resource));
+// append_to_collection((void ***)&p_vkrs->loaded_fonts.fonts, &p_vkrs->loaded_fonts.capacity,
+//     &p_vkrs->loaded_fonts.count, font);
+
+// font->name = font_name;
+// font->height = font_height;
+// font->texture = texture;
+// font->char_data = cdata;
+// {
+// float lowest = 500;
+// for (int ci = 0; ci < 96; ++ci) {
+// stbtt_aligned_quad q;
+
+// // printf("garbagein: %i %i %f %f %i\n", (int)font_image->width, (int)font_image->height, align_x, align_y,
+// // letter
+// // - 32);
+// float ax = 100, ay = 300;
+// stbtt_GetBakedQuad(cdata, (int)texWidth, (int)texHeight, ci, &ax, &ay, &q, 1);
+// if (q.y0 < lowest)
+// lowest = q.y0;
+// // printf("baked_quad: s0=%.2f s1==%.2f t0=%.2f t1=%.2f x0=%.2f x1=%.2f y0=%.2f y1=%.2f lowest=%.3f\n", q.s0,
+// // q.s1,
+// //        q.t0, q.t1, q.x0, q.x1, q.y0, q.y1, lowest);
+// }
+// font->draw_vertical_offset = 300 - lowest;
+// }
+
+// *p_resource = font;
+// printf("generated font resource> name:%s height:%.2f resource_uid:%u\n", font_name, font_height,
+// font->texture->resource_uid);
+// }
+
+// return res;
+  // fmt.println("load_font> NotYetImplemented")
+  // err = .NotYetImplemented
   return
 }

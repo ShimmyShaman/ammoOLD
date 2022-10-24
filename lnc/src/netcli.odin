@@ -176,9 +176,9 @@ _reconnect_to_server :: proc(cli: ^HostInfo) {
 
   // Reset
   res = 0
-  for i in 0..<cli.netdata.connection_sequence_retries do res += auto_cast i
-  res = min(90, 1 + res)
-  if res > 9 {
+  for i in 0..<cli.netdata.connection_sequence_retries do res += auto_cast (i + i / 2)
+  res = min(30, 1 + res)
+  if res > 7 {
     fmt.println("[C] Connection Attempts failed! Retrying in", res, "seconds...")
   } else {
     // fmt.println("")
