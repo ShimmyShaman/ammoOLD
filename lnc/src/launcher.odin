@@ -84,7 +84,7 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
   defer vi.destroy_resource(ctx, parth)
  
   font: vi.FontResourceHandle
-  font, err = vi.load_font(ctx, "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf", 16)
+  font, err = vi.load_font(ctx, "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf", 25)
   defer vi.destroy_resource(ctx, font)
   if err != .Success do return .NotYetDetailed
   
@@ -210,7 +210,13 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     co = mu.Color{15, 255, 255, 125}
     if vi.stamp_textured_rect(rctx, handle_2d, parth, auto_cast &sq, auto_cast &co) != .Success do return .NotYetDetailed
 
-    // vi.stamp_text(rctx, handle_2d,  "Hello World", mu.Rect{100, 100, 300, 200}, mu.Color{255, 255, 255, 255}, 0.0, 0.0, 0.0, 0.0)
+    sq = mu.Rect{40, 272, 256, 256}
+    co = mu.Color{255, 255, 255, 255}
+    fontr: rawptr
+    fontr, verr = vi._get_resource(&ctx.resource_manager, auto_cast font)
+    if verr != .Success do return .NotYetDetailed
+    if vi.stamp_textured_rect(rctx, handle_2d, (cast(^vi.Font)fontr).texture, auto_cast &sq, auto_cast &co) != .Success do return .NotYetDetailed
+    vi.stamp_text(rctx, handle_2d, font, "Hello World", 300, 400, auto_cast &co)
     // cmd : ^mu.Command
     // for mu.next_command(&muc, &cmd) {
     //   // fmt.println("next_command:", cmd)

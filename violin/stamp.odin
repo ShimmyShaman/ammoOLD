@@ -10,6 +10,7 @@ import "core:strings"
 import vk "vendor:vulkan"
 // import stb "vendor:stb/lib"
 import stbi "vendor:stb/image"
+import stbtt "vendor:stb/truetype"
 import vma "../deps/odin-vma"
 
 Rect :: struct {
@@ -46,7 +47,7 @@ Vertex2UV :: struct {
 
 
 init_stamp_batch_renderer :: proc(using ctx: ^Context, render_pass_config: RenderPassConfigFlags,
-  uniform_buffer_size := 256 * 8 * 4) -> (stamph: StampRenderResourceHandle, err: Error) {
+  uniform_buffer_size := 128 * 256) -> (stamph: StampRenderResourceHandle, err: Error) {
   // Create the resource
   stamph = auto_cast _create_resource(&resource_manager, .StampRenderResource) or_return
   stampr: ^StampRenderResource = auto_cast _get_resource(&resource_manager, auto_cast stamph) or_return
@@ -382,7 +383,7 @@ stamp_colored_rect :: proc(using rctx: ^RenderContext, stamp_handle: StampRender
 }
 
 stamp_textured_rect :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResourceHandle, txh: TextureResourceHandle,
-  rect: ^Rect, tint: ^Color = nil) -> Error {
+  rect: ^Rect, tint: ^Color = nil, sub_uv_coords: [4]f32 = {0.0, 0.0, 1.0, 1.0}) -> Error {
   // Obtain the resources
   stampr: ^StampRenderResource = auto_cast _get_resource(&rctx.ctx.resource_manager, auto_cast stamp_handle) or_return
   texture: ^Texture = auto_cast _get_resource(&rctx.ctx.resource_manager, auto_cast txh) or_return
@@ -395,7 +396,8 @@ stamp_textured_rect :: proc(using rctx: ^RenderContext, stamp_handle: StampRende
   if tint_ == nil {
     tint_ = &Color_White
   }
-  parameter_data := [8]f32 {
+  PARAM_COUNT :: 12
+  parameter_data := [PARAM_COUNT]f32 {
     auto_cast rect.x / cast(f32)rctx.ctx.swap_chain.extent.width,
     auto_cast rect.y / cast(f32)rctx.ctx.swap_chain.extent.height,
     auto_cast rect.w / cast(f32)rctx.ctx.swap_chain.extent.width,
@@ -404,11 +406,15 @@ stamp_textured_rect :: proc(using rctx: ^RenderContext, stamp_handle: StampRende
     auto_cast tint_.g / 255.0,
     auto_cast tint_.b / 255.0,
     auto_cast tint_.a / 255.0,
+    sub_uv_coords[0],
+    sub_uv_coords[1],
+    sub_uv_coords[2] - sub_uv_coords[0],
+    sub_uv_coords[3] - sub_uv_coords[1],
   }
 
   // Write to the HOST_VISIBLE memory
   ubo_offset: vk.DeviceSize = auto_cast stampr.uniform_buffer.utilization
-  ubo_range: int : size_of(f32) * 8
+  ubo_range: int : size_of(f32) * PARAM_COUNT
 
   if ubo_offset + auto_cast ubo_range > stampr.uniform_buffer.capacity {
     fmt.eprintln("Error] stamp_colored_rect> stamp uniform buffer is full. Too many calls for initial buffer size.",
@@ -523,4 +529,258 @@ stamp_textured_rect :: proc(using rctx: ^RenderContext, stamp_handle: StampRende
 }
 
 // vi.stamp_text(rctx, handle_2d, cmd_t.font, cmd_t.text, cmd_t.pos.x, cmd_t.pos.y, cmd_t.color)
-// stamp_text :: proc(using rctx: ^RenderContext, )
+stamp_text :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResourceHandle, font_handle: FontResourceHandle,
+  text: string, #any_int pos_x: int, #any_int pos_y: int, color: ^Color) -> Error {
+  // Text Length
+  text_length := len(text)
+  if text_length == 0 do return .Success
+  
+  // Get the font image
+  font: ^Font = auto_cast _get_resource(&ctx.resource_manager, auto_cast font_handle) or_return
+  font_texture: ^Texture = auto_cast _get_resource(&ctx.resource_manager, auto_cast font.texture) or_return
+
+  align_x: f32 = auto_cast pos_x
+  align_y: f32 = auto_cast pos_y
+
+  letter: u8
+  clip: vk.Rect2D
+  cc: ^Rect
+  q: stbtt.aligned_quad
+  width, height, scale_multiplier: f32
+
+  for c := 0; c < text_length; c += 1 {
+    letter = text[c]
+
+    // fmt.println("align_x:", align_x)
+    // if align_x > auto_cast font_texture.width do break
+    //   letter = cmd->print_text.text[c];
+    //   if (letter < 32 || letter > 127) {
+    //     printf("TODO character not supported.\n");
+    //     return VK_SUCCESS;
+    //   }
+    //   // printf("printing character '%c' %i\n", letter, (int)letter);
+    letter = text[c]
+    if letter < 32 || letter > 127 {
+      fmt.eprintln(args={"ERROR>stamp_text: character '", letter, "' not supported."}, sep = "")
+      return .NotYetDetailed
+    }
+  
+    // Source texture bounds
+    stbtt.GetBakedQuad(font.char_data, auto_cast font_texture.width, auto_cast font_texture.height, auto_cast letter - 32,
+      &align_x, &align_y, &q, true)
+    // TODO -- opengl_fill_rule??? // 1=opengl & d3d10+,0=d3d9 -- should be true, nothing on net about it
+  
+    rect: Rect = {auto_cast q.x0, auto_cast q.y0, auto_cast (q.x1 - q.x0), auto_cast (q.y1 - q.y0)}
+    fmt.println("letter:", letter, "rect:", rect, "q.s0:", q.s0, "q.t0:", q.t0, "q.s1:", q.s1, "q.t1:", q.t1)
+    stamp_textured_rect(rctx, stamp_handle, font.texture, &rect, color, {q.s0, q.t0, q.s1, q.t1})
+
+  // -- FROM HERE --
+  //   //   // TODO -- figure out why this won't work
+  //   //   // if (letter == ' ') {
+  //   //   //   // No need to print empty space (yet...)
+  //   //   //   continue;
+  //   //   // }
+  
+  //   //   // printf("mrt-2\n");
+  //   //   // stbtt_bakedchar *b = font->char_data + (letter - 32);
+  //   //   // q.y0 += b->y1 - b->y0;
+  //   //   // q.y1 += b->y1 - b->y0;
+  //   //   // {
+  //   //   //   // opengl y invert
+  //   //   //   float t = q.y1;
+  //   //   //   q.y1 += (q.y1 - q.y0);
+  //   //   //   q.y0 = t;
+  //   //   // }
+  //   //   width = q.x1 - q.x0;
+  //   //   height = q.y1 - q.y0;
+  //   width = q.x1 - q.x0
+  //   height = q.y1 - q.y0
+  
+  //   //   q.y0 += font->draw_vertical_offset;
+  //   //   q.y1 += font->draw_vertical_offset;
+  //   q.y0 += font.draw_vertical_offset
+  //   q.y1 += font.draw_vertical_offset
+  
+  //   // Determine the clip
+  //   clip.offset.x = auto_cast (q.x0 < 0 ? 0 : q.x0)
+  //   clip.offset.y = auto_cast (q.y0 < 0 ? 0 : q.y0)
+  //   clip.extent.width = auto_cast width
+  //   clip.extent.height = auto_cast height
+  //   {
+  //     // TODO -- clipping
+  //     // cc = auto_cast &cmd_t.clip
+  //   //     if (cc->extents.width && cc->extents.height) {
+  //   //       if (clip.offset.x < cc->offset.x)
+  //   //         clip.offset.x = cc->offset.x;
+  //   //       if (clip.offset.y < cc->offset.y)
+  //   //         clip.offset.y = cc->offset.y;
+  //   //       if (clip.offset.x + clip.extent.width > cc->offset.x + cc->extents.width) {
+  //   //         if (cc->offset.x + cc->extents.width <= clip.offset.x)
+  //   //           clip.extent.width = 0U;
+  //   //         else
+  //   //           clip.extent.width = cc->offset.x + cc->extents.width - clip.offset.x;
+  //   //       }
+  //   //       if (clip.offset.y + clip.extent.height > cc->offset.y + cc->extents.height) {
+  //   //         if (cc->offset.y + cc->extents.height <= clip.offset.y)
+  //   //           clip.extent.height = 0U;
+  //   //         else
+  //   //           clip.extent.height = cc->offset.y + cc->extents.height - clip.offset.y;
+  //   //       }
+  //   }
+  
+  //   //     if (clip.extent.width <= 0U || clip.extent.height <= 0U)
+  //   //       continue;
+  //   //     if (clip.offset.x >= image_render->image_width || clip.offset.y >= image_render->image_height)
+  //   //       continue;
+  //   if clip.extent.width <= 0 || clip.extent.height <= 0 do continue
+  //   if clip.offset.x >= font.image.width || clip.offset.y >= font.image.height do continue
+  
+  //   //     // if (clip.extent.width > 4444) {
+  //   //     //   printf("clip:%i %i %u %u || cc:%i %i %u %u\n", clip.offset.x, clip.offset.y, clip.extent.width,
+  //   //     //          clip.extent.height, cc->offset.x, cc->offset.y, cc->extents.width, cc->extents.height);
+  //   //     // }
+  //   // }
+  //   //   // printf("baked_quad: s0=%.2f s1==%.2f t0=%.2f t1=%.2f x0=%.2f x1=%.2f y0=%.2f y1=%.2f xoff=%.2f yoff=%.2f\n",
+  //   //   // q.s0,
+  //   //   //        q.s1, q.t0, q.t1, q.x0, q.x1, q.y0, q.y1, font->char_data->xoff, font->char_data->yoff);
+  //   //   // printf("align_x=%.2f align_y=%.2f\n", align_x, align_y);
+  //   //   // printf("font->draw_vertical_offset=%.2f\n", font->draw_vertical_offset);
+  
+  //   // Vertex Uniform Buffer Object  -- TODO do checking on copy_buffer->index and data array size
+  //   //   vert_data_scale_offset *vert_ubo_data = (vert_data_scale_offset *)&copy_buffer->data[copy_buffer->index];
+  //   //   copy_buffer->index += sizeof(vert_data_scale_offset);
+  //   //   MCassert(copy_buffer->index < MRT_SEQUENCE_COPY_BUFFER_SIZE, "BUFFER TOO SMALL");
+  //   //   // printf("mrt-2a\n");
+  
+  //   //   scale_multiplier =
+  //   //       1.f / (float)(image_render->image_width < image_render->image_height ? image_render->image_width
+  //   //                                                                            : image_render->image_height);
+  //   //   vert_ubo_data->scale.x = 2.f * width * scale_multiplier;
+  //   //   vert_ubo_data->scale.y = 2.f * height * scale_multiplier;
+  //   //   vert_ubo_data->offset.x = -1.0f + 2.0f * q.x0 / (float)(image_render->image_width) +
+  //   //                             1.0f * (float)width / (float)(image_render->image_width);
+  //   //   vert_ubo_data->offset.y = -1.0f + 2.0f * q.y0 / (float)(image_render->image_height) +
+  //   //                             1.0f * (float)height / (float)(image_render->image_height);
+  
+  //   //   // printf("mrt-3\n");
+  //   //   // Fragment Data
+  //   //   frag_ubo_tint_texcoordbounds *frag_ubo_data =
+  //   //       (frag_ubo_tint_texcoordbounds *)&copy_buffer->data[copy_buffer->index];
+  //   //   copy_buffer->index += sizeof(frag_ubo_tint_texcoordbounds);
+  //   //   MCassert(copy_buffer->index < MRT_SEQUENCE_COPY_BUFFER_SIZE, "BUFFER TOO SMALL");
+  
+  //   //   memcpy(&frag_ubo_data->tint, &cmd->print_text.color, sizeof(float) * 4);
+  //   //   frag_ubo_data->tex_coord_bounds.s0 = q.s0;
+  //   //   frag_ubo_data->tex_coord_bounds.s1 = q.s1;
+  //   //   frag_ubo_data->tex_coord_bounds.t0 = q.t0;
+  //   //   frag_ubo_data->tex_coord_bounds.t1 = q.t1;
+  
+  //   //   // Setup viewport and clip
+  //   //   // printf("image_render : %f, %f\n",  (float)image_render->image_width,  (float)image_render->image_height);
+  //   //   set_viewport_cmd(command_buffer, 0.f, 0.f, (float)image_render->image_width, (float)image_render->image_height);
+  //   //   vkCmdSetScissor(command_buffer, 0, 1, &clip);
+  //   //   // set_scissor_cmd(command_buffer, clip.offset.x, clip.offset.y, clip.extent.width, clip.extent.height);
+  
+  //   //   // printf("mrt-4\n");
+  //   //   // Allocate the descriptor set from the pool.
+  //   //   VkDescriptorSetAllocateInfo setAllocInfo = {};
+  //   //   setAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  //   //   setAllocInfo.pNext = NULL;
+  //   //   setAllocInfo.descriptorPool = p_vkrs->descriptor_pool;
+  //   //   setAllocInfo.descriptorSetCount = 1;
+  //   //   setAllocInfo.pSetLayouts = &p_vkrs->font_prog.descriptor_layout;
+  
+  //   //   unsigned int descriptor_set_index = p_vkrs->descriptor_sets_count;
+  //   //   // printf("cmd->text:'%s' descriptor_set_index=%u\n", cmd->print_text.text, descriptor_set_index);
+  //   //   res = vkAllocateDescriptorSets(p_vkrs->device, &setAllocInfo, &p_vkrs->descriptor_sets[descriptor_set_index]);
+  //   //   VK_CHECK(res, "vkAllocateDescriptorSets");
+  
+  //   //   VkDescriptorSet desc_set = p_vkrs->descriptor_sets[descriptor_set_index];
+  //   //   p_vkrs->descriptor_sets_count += setAllocInfo.descriptorSetCount;
+  
+  //   //   // Queue Buffer and Descriptor Writes
+  //   //   const unsigned int MAX_DESC_SET_WRITES = 4;
+  //   //   VkWriteDescriptorSet writes[MAX_DESC_SET_WRITES];
+  //   //   VkDescriptorBufferInfo buffer_infos[MAX_DESC_SET_WRITES];
+  //   //   int buffer_info_index = 0;
+  //   //   int write_index = 0;
+  
+  //   //   // printf("mrt-5\n");
+  //   //   VkDescriptorBufferInfo *vert_ubo_info = &buffer_infos[buffer_info_index++];
+  //   //   res = mrt_write_desc_and_queue_render_data(p_vkrs, sizeof(vert_data_scale_offset), vert_ubo_data, vert_ubo_info);
+  //   //   VK_CHECK(res, "mrt_write_desc_and_queue_render_data");
+  
+  //   //   VkDescriptorBufferInfo *frag_ubo_info = &buffer_infos[buffer_info_index++];
+  //   //   res = mrt_write_desc_and_queue_render_data(p_vkrs, sizeof(frag_ubo_tint_texcoordbounds), frag_ubo_data,
+  //   //                                              frag_ubo_info);
+  //   //   VK_CHECK(res, "mrt_write_desc_and_queue_render_data");
+  
+  //   //   // printf("mrt-6\n");
+  //   //   // Global Vertex Shader Uniform Buffer
+  //   //   VkWriteDescriptorSet *write = &writes[write_index++];
+  //   //   write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  //   //   write->pNext = NULL;
+  //   //   write->dstSet = desc_set;
+  //   //   write->descriptorCount = 1;
+  //   //   write->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  //   //   write->pBufferInfo = &copy_buffer->vpc_desc_buffer_info;
+  //   //   write->dstArrayElement = 0;
+  //   //   write->dstBinding = 0;
+  
+  //   //   // Element Vertex Shader Uniform Buffer
+  //   //   write = &writes[write_index++];
+  //   //   write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  //   //   write->pNext = NULL;
+  //   //   write->dstSet = desc_set;
+  //   //   write->descriptorCount = 1;
+  //   //   write->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  //   //   write->pBufferInfo = vert_ubo_info;
+  //   //   write->dstArrayElement = 0;
+  //   //   write->dstBinding = 1;
+  
+  //   //   // Element Fragment Shader Uniform Buffer
+  //   //   write = &writes[write_index++];
+  //   //   write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  //   //   write->pNext = NULL;
+  //   //   write->dstSet = desc_set;
+  //   //   write->descriptorCount = 1;
+  //   //   write->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  //   //   write->pBufferInfo = frag_ubo_info;
+  //   //   write->dstArrayElement = 0;
+  //   //   write->dstBinding = 2;
+  
+  //   //   // printf("mrt-7\n");
+  //   //   VkDescriptorImageInfo image_sampler_info = {};
+  //   //   image_sampler_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  //   //   image_sampler_info.imageView = font_image->view;
+  //   //   image_sampler_info.sampler = font_image->sampler;
+  
+  //   //   // Element Fragment Shader Combined Image Sampler
+  //   //   write = &writes[write_index++];
+  //   //   write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  //   //   write->pNext = NULL;
+  //   //   write->dstSet = desc_set;
+  //   //   write->descriptorCount = 1;
+  //   //   write->descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  //   //   write->pImageInfo = &image_sampler_info;
+  //   //   write->dstArrayElement = 0;
+  //   //   write->dstBinding = 3;
+  
+  //   //   // printf("mrt-8\n");
+  //   //   vkUpdateDescriptorSets(p_vkrs->device, write_index, writes, 0, NULL);
+  
+  //   //   vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, p_vkrs->font_prog.pipeline_layout, 0, 1,
+  //   //                           &desc_set, 0, NULL);
+  
+  //   //   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, p_vkrs->font_prog.pipeline);
+  
+  //   //   const VkDeviceSize offsets[1] = {0};
+  //   //   vkCmdBindVertexBuffers(command_buffer, 0, 1, &p_vkrs->textured_shape_vertices.buf, offsets);
+  
+  //   //   vkCmdDraw(command_buffer, 2 * 3, 1, 0, 0);
+  //   //   // printf("mrt-9\n");
+  }
+
+  // free(cmd->print_text.text);
+  return .Success
+}

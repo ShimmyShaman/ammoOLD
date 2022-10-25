@@ -778,6 +778,7 @@ load_texture_from_file :: proc(using ctx: ^Context, filepath: cstring) -> (rh: T
   
   tex_width, tex_height, tex_channels: libc.int
   pixels := stbi.load(filepath, &tex_width, &tex_height, &tex_channels, STBI_rgb_alpha)
+  defer stbi.image_free(pixels)
   if pixels == nil {
     err = .NotYetDetailed
     fmt.eprintln("Violin.load_texture_from_file: Failed to load image from file:", filepath)
@@ -792,8 +793,6 @@ load_texture_from_file :: proc(using ctx: ^Context, filepath: cstring) -> (rh: T
   texture: ^Texture = auto_cast _get_resource(&resource_manager, auto_cast rh) or_return
 
   write_to_texture(ctx, rh, pixels, image_size) or_return
-
-  stbi.image_free(pixels)
 
   fmt.printf("loaded %s> width:%i height:%i channels:%i\n", filepath, tex_width, tex_height, tex_channels);
 
@@ -1204,7 +1203,7 @@ load_font :: proc(using ctx: ^Context, ttf_filepath: string, font_height: f32) -
   fh = auto_cast _create_resource(&resource_manager, .Font) or_return
   font: ^Font = auto_cast _get_resource(&resource_manager, auto_cast fh) or_return
   font.texture = create_texture(ctx, tex_width, tex_height, tex_channels, .ShaderReadOnly) or_return
-  font.cdata = auto_cast mem.alloc(size=96 * size_of(stbtt.bakedchar), allocator = context.temp_allocator)
+  font.char_data = auto_cast mem.alloc(size=96 * size_of(stbtt.bakedchar), allocator = context.temp_allocator)
 
 // const int texWidth = 256, texHeight = 256, texChannels = 4;
 // stbi_uc temp_bitmap[texWidth * texHeight];
@@ -1215,21 +1214,27 @@ load_font :: proc(using ctx: ^Context, ttf_filepath: string, font_height: f32) -
   tex_height :: 256
   tex_channels :: 4
   temp_bitmap: [^]u8 = auto_cast mem.alloc(size=tex_width * tex_height, allocator = context.temp_allocator)
-  defer free(temp_bitmap)
+  // defer free(temp_bitmap) // TODO -- no clue why this is causing segmentation fault. I've gotta be missing something right?
 
-  stbtt.BakeFontBitmap(&ttf_buffer[0], 0, font_height, temp_bitmap, tex_width, tex_height, 32, 96, cdata)
+  stb_res := stbtt.BakeFontBitmap(&ttf_buffer[0], 0, font_height, temp_bitmap, tex_width, tex_height, 32, 96, font.char_data)
+  if stb_res < 1 {
+    fmt.println("ERROR Failed to bake font bitmap:", stb_res)
+    err = .NotYetDetailed
+    return
+  }
+  // stbtt.FreeBitmap(temp_bitmap, nil)
 
-// // printf("garbagein: font_height:%f\n", font_height);
-// stbi_uc pixels[texWidth * texHeight * 4];
-// {
-// int p = 0;
-// for (int i = 0; i < texWidth * texHeight; ++i) {
-// pixels[p++] = temp_bitmap[i];
-// pixels[p++] = temp_bitmap[i];
-// pixels[p++] = temp_bitmap[i];
-// pixels[p++] = 255;
-// }
-// }
+// // // printf("garbagein: font_height:%f\n", font_height);
+// // stbi_uc pixels[texWidth * texHeight * 4];
+// // {
+// // int p = 0;
+// // for (int i = 0; i < texWidth * texHeight; ++i) {
+// // pixels[p++] = temp_bitmap[i];
+// // pixels[p++] = temp_bitmap[i];
+// // pixels[p++] = temp_bitmap[i];
+// // pixels[p++] = 255;
+// // }
+// // }
 
   // Copy the font data into the texture
   pixels := make([^]u8, tex_width * tex_height * 4, context.temp_allocator)
