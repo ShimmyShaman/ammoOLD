@@ -174,7 +174,7 @@ init_stamp_batch_renderer :: proc(using ctx: ^Context, render_pass_config: Rende
   stampr.textured_rect_render_program = create_render_program(ctx, &render_program_create_info) or_return
   
   // Uniform Buffer
-  stampr.uniform_buffer.capacity = auto_cast (size_of(f32) * 8 * 256) // TODO -- appropriate size
+  stampr.uniform_buffer.capacity = auto_cast (size_of(f32) * uniform_buffer_size) // TODO -- appropriate size
   stampr.uniform_buffer.rh = create_uniform_buffer(ctx, stampr.uniform_buffer.capacity, .Dynamic) or_return
 
   // Ensure the created uniform buffer is HOST_VISIBLE for dynamic copying
@@ -571,7 +571,7 @@ stamp_text :: proc(using rctx: ^RenderContext, stamp_handle: StampRenderResource
     // TODO -- opengl_fill_rule??? // 1=opengl & d3d10+,0=d3d9 -- should be true, nothing on net about it
   
     rect: Rect = {auto_cast q.x0, auto_cast q.y0, auto_cast (q.x1 - q.x0), auto_cast (q.y1 - q.y0)}
-    fmt.println("letter:", letter, "rect:", rect, "q.s0:", q.s0, "q.t0:", q.t0, "q.s1:", q.s1, "q.t1:", q.t1)
+    // fmt.println("letter:", letter, "rect:", rect, "q.s0:", q.s0, "q.t0:", q.t0, "q.s1:", q.s1, "q.t1:", q.t1)
     stamp_textured_rect(rctx, stamp_handle, font.texture, &rect, color, {q.s0, q.t0, q.s1, q.t1})
 
   // -- FROM HERE --

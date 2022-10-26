@@ -144,7 +144,7 @@ _reconnect_to_server :: proc(cli: ^HostInfo) {
 
   // Attempt to connect to the server
   cli.netdata.status = .Connecting
-  fmt.println("[C] Attempting to connect to server...")
+  // fmt.println("[C] Attempting to connect to server...")
   cli.server = enet.host_connect(cli.host, &cli.netdata.server_address, 2, 0)
   if cli.server == nil {
     fmt.println("[C] peer host_connect failed!")
@@ -179,7 +179,7 @@ _reconnect_to_server :: proc(cli: ^HostInfo) {
   for i in 0..<cli.netdata.connection_sequence_retries do res += auto_cast (i + i / 2)
   res = min(30, 1 + res)
   if res > 7 {
-    fmt.println("[C] Connection Attempts failed! Retrying in", res, "seconds...")
+    fmt.println("[C] Failed to connect to server! Retrying in", res, "seconds...")
   } else {
     // fmt.println("")
     res = 0
