@@ -12,6 +12,7 @@ import "vendor:sdl2"
 import stbtt "vendor:stb/truetype"
 
 import vi "../../violin"
+import vig "../../violin/gui"
 
 main :: proc() {
   // TODO -- debug convenience delay
@@ -88,6 +89,18 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
   defer vi.destroy_resource(ctx, font)
   if err != .Success do return .NotYetDetailed
 
+  // Create Graphical User Interface
+  gui: ^vig.GUIRoot
+  if gui, err = vig.create_gui_root(ctx); err != .Success do return .NotYetDetailed // ctx, stamprr, font
+  defer vig.destroy_gui(&gui)
+  
+  label: ^vig.Label
+  if label, err = vig.create_label(gui); err != .Success do return .NotYetDetailed
+  // name_textbox: vig.Textbox
+  // name_textbox, err = vig.create_textbox(gui, "name_textbox")
+  // button: ^vig.Button
+  // button, err= vig.create_button(gui, "Connect") //, .Centered, .Centered
+  
   // rd2: vi.RenderData
   // rp2: vi.RenderProgram
   // rd2, rp2, err = load_textured_rect(ctx, rpass2d)
@@ -122,17 +135,6 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
   // Loop
   fmt.println("Init Success. Entering Game Loop...")
   loop : for {
-    // Handle Window Events
-    do_break_loop = handle_window_events() or_return
-    if do_break_loop {
-      break loop
-    }
-
-    // fmt.println("framebuffers_3d", len(ctx.framebuffers_3d))
-    // fmt.println("framebuffers_2d", len(ctx.swap_chain.present_framebuffers))
-    // fmt.println("image_views", len(ctx.swap_chain.image_views))
-    // fmt.println("images", len(ctx.swap_chain.images))
-
     // FPS
     now = time.now()
     elapsed = auto_cast time.duration_seconds(time.diff(prev, now))
@@ -154,10 +156,18 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
       prev_fps_check = total_elapsed
     }
 
+    // --- ###  Update  ### ---
+    // Obtain Window Events
+    do_break_loop = handle_window_events(gui) or_return
+    if do_break_loop {
+      break loop
+    }
+
+    // Update GUI
+    vig.update_gui(gui)
+
     // --- ### Draw the Frame ### ---
-    // post_processing = false // So there is no intemediary render target draw... Everything is straight to present
-    rctx, verr = vi.begin_present(ctx)
-    if verr != .Success do return .NotYetDetailed
+    if rctx, verr = vi.begin_present(ctx); verr != .Success do return .NotYetDetailed
 
     // 3D
     // if vi.begin_render_pass(rctx, rpass3d) != .Success do break loop
@@ -201,6 +211,8 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
     // if vi.stamp_textured_rect(rctx, stamprr, (cast(^vi.Font)fontr).texture, auto_cast &sq, auto_cast &co) != .Success do return .NotYetDetailed
     // vi.stamp_text(rctx, stamprr, font, "Hello World", 300, 400, auto_cast &co)
 
+    if vig.render_gui(rctx, stamprr, gui) != .Success do return .NotYetDetailed
+
     if vi.end_present(rctx) != .Success {
       fmt.println("end_present error")
       return .NotYetDetailed
@@ -222,8 +234,7 @@ _begin_game_loop :: proc(ctx: ^vi.Context, launcher_data: ^LauncherData) -> Erro
   return .Success
 }
 
-handle_window_events :: proc() -> (do_end_loop: bool, err: Error) {
-
+handle_window_events :: proc(gui: ^vig.GUIRoot) -> (do_end_loop: bool, err: Error) {
   /* handle SDL events */
 	event: sdl2.Event
   for sdl2.PollEvent(&event) {
@@ -231,37 +242,25 @@ handle_window_events :: proc() -> (do_end_loop: bool, err: Error) {
       case .QUIT:
         do_end_loop = true
         return
-      case .MOUSEMOTION:
-        ;
-      case .MOUSEWHEEL:
-        ;
-      case .TEXTINPUT:
-        ; // mu.input_text(muc, string(cstring(&event.text.text[0])))
-      case .MOUSEBUTTONDOWN, .MOUSEBUTTONUP:
-        // button_map :: #force_inline proc(button: u8) -> (res: mu.Mouse, ok: bool) {
-        //   ok = true;
-        //   switch button {
-        //     case 1: res = .LEFT;
-        //     case 2: res = .MIDDLE;
-        //     case 3: res = .RIGHT;
-        //     case: ok = false;
-        //   }
-        //   return;
-        // }
-        // if btn, ok := button_map(event.button.button); ok {
-        //   #partial switch event.type {
-        //     case .MOUSEBUTTONDOWN:
-        //       mu.input_mouse_down(muc, event.button.x, event.button.y, btn)
-        //     case .MOUSEBUTTONUP:
-        //       mu.input_mouse_up(muc, event.button.x, event.button.y, btn)
-        //   }
-        // }
-        ;
       case .KEYDOWN, .KEYUP:
         if event.key.keysym.sym == .ESCAPE || event.key.keysym.sym == .F4 {
           do_end_loop = true
           return
         }
+        fallthrough
+      case .MOUSEMOTION, .MOUSEWHEEL, .TEXTINPUT, .MOUSEBUTTONDOWN, .MOUSEBUTTONUP:
+        handled, err := vig.handle_gui_event(gui, &event)
+        if err != .Success {
+          err = .NotYetDetailed
+          // TODO -- non-fatal errors
+          return
+        }
+        if handled do continue
+
+        // fmt.println("Unhandled event:", event.type)
+      case:
+        // fmt.println("Unknown event:", event.type)
+        ;
     }
   }
 
